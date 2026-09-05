@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "Ubuntu live medium-only placeholder",
+  "description": "Placeholder Ubuntu live medium-only profile for future Build ISO work.",
+  "distro": "ubuntu",
+  "stage": "live",
+  "kind": "udeb",
+  "enabled_by_default": false,
+  "module_names": [],
+  "live_initramfs_modules": [],
+  "module_alias_candidates": [],
+  "kernel_config_symbols": [],
+  "extra_chroot_packages": [],
+  "extra_binary_packages": [],
+  "local_deb_dir": "",
+  "local_udeb_dir": "",
+  "udeb_rebuild_spec_path": "",
+  "source_overlay_dir": "",
+  "kernel_version": "",
+  "notes": [
+    "Schema-compatible placeholder for Ubuntu live medium-only defaults."
+  ]
+}

@@ -1,0 +1,296 @@
+{
+  "schema_version": 2,
+  "name": "Debian-family Live recovery and administration tools",
+  "description": "Selectable packages installed into supported Debian-family Live root filesystems so storage recovery, firmware maintenance, networking, diagnostics, and routine administration do not depend on a boot-time package installation.",
+  "supported_profiles": [
+    "debian",
+    "kali-linux",
+    "ubuntu-desktop"
+  ],
+  "build_distros": {
+    "debian": "debian",
+    "kali-linux": "kali-linux",
+    "ubuntu": "ubuntu-desktop"
+  },
+  "package_groups": [
+    {
+      "id": "filesystem_core",
+      "title": "Filesystem and partitioning tools",
+      "description": "Core disk layout and ext, FAT, exFAT, and NTFS creation, checking, and repair utilities.",
+      "packages": [
+        "util-linux",
+        "fdisk",
+        "parted",
+        "gdisk",
+        "e2fsprogs",
+        "dosfstools",
+        "exfatprogs",
+        "ntfs-3g"
+      ]
+    },
+    {
+      "id": "nvme",
+      "title": "NVMe tools",
+      "description": "Inspect, diagnose, format, sanitize, and manage NVMe devices with nvme-cli.",
+      "packages": [
+        "nvme-cli"
+      ]
+    },
+    {
+      "id": "f2fs",
+      "title": "F2FS tools",
+      "description": "Create, inspect, resize, and repair F2FS filesystems.",
+      "packages": [
+        "f2fs-tools"
+      ]
+    },
+    {
+      "id": "btrfs",
+      "title": "Btrfs tools",
+      "description": "Create, inspect, scrub, balance, rescue, and repair Btrfs filesystems.",
+      "packages": [
+        "btrfs-progs"
+      ]
+    },
+    {
+      "id": "xfs",
+      "title": "XFS tools",
+      "description": "Create, inspect, grow, copy, and repair XFS filesystems.",
+      "packages": [
+        "xfsprogs"
+      ]
+    },
+    {
+      "id": "storage_management",
+      "title": "LVM, RAID, and encryption",
+      "description": "Manage LVM volumes, Linux MD RAID arrays, and LUKS-encrypted storage.",
+      "packages": [
+        "lvm2",
+        "mdadm",
+        "cryptsetup"
+      ]
+    },
+    {
+      "id": "storage_diagnostics",
+      "title": "Storage diagnostics",
+      "description": "Inspect SMART, ATA, SCSI, and block-device health and capabilities.",
+      "packages": [
+        "smartmontools",
+        "hdparm",
+        "sg3-utils",
+        "lsscsi"
+      ]
+    },
+    {
+      "id": "data_recovery",
+      "title": "Data recovery and imaging",
+      "description": "Recover partitions and files, clone filesystems, rescue damaged media, and handle SquashFS images.",
+      "packages": [
+        "squashfs-tools",
+        "partclone",
+        "fsarchiver",
+        "testdisk",
+        "gddrescue"
+      ]
+    },
+    {
+      "id": "network_core",
+      "title": "Network configuration tools",
+      "description": "Configure wired and wireless links, addresses, routes, DNS, bridges, and radio state.",
+      "packages": [
+        "iproute2",
+        "iputils-ping",
+        "ethtool",
+        "iw",
+        "wpasupplicant",
+        "network-manager",
+        "bind9-dnsutils",
+        "traceroute",
+        "mtr-tiny",
+        "net-tools",
+        "bridge-utils",
+        "rfkill",
+        "whois"
+      ]
+    },
+    {
+      "id": "nmap",
+      "title": "Nmap network scanner",
+      "description": "Discover hosts, services, versions, and common network exposure with nmap.",
+      "packages": [
+        "nmap"
+      ]
+    },
+    {
+      "id": "network_diagnostics",
+      "title": "Network diagnostics and capture",
+      "description": "Capture traffic, test throughput, relay sockets, and troubleshoot TCP and UDP services.",
+      "packages": [
+        "tcpdump",
+        "netcat-openbsd",
+        "socat",
+        "iperf3"
+      ]
+    },
+    {
+      "id": "remote_access",
+      "title": "Remote access and transfer",
+      "description": "Retrieve files and work with remote systems through HTTP, SSH, rsync, and related protocols.",
+      "packages": [
+        "curl",
+        "wget",
+        "openssh-client",
+        "rsync"
+      ]
+    },
+    {
+      "id": "firewall",
+      "title": "Firewall tools",
+      "description": "Inspect and repair nftables and iptables firewall policies.",
+      "packages": [
+        "nftables",
+        "iptables"
+      ]
+    },
+    {
+      "id": "firmware_inspection",
+      "title": "Firmware and hardware inventory",
+      "description": "Inventory firmware, PCI, USB, DMI, and general hardware information.",
+      "packages": [
+        "fwupd",
+        "pciutils",
+        "usbutils",
+        "dmidecode",
+        "lshw"
+      ]
+    },
+    {
+      "id": "firmware_updates",
+      "title": "Firmware update tools",
+      "description": "Apply LVFS-supported updates, inspect Secure Boot state, manage EFI boot entries, and service flash devices.",
+      "packages": [
+        "fwupd",
+        "flashrom",
+        "efibootmgr",
+        "mokutil"
+      ]
+    },
+    {
+      "id": "firmware_programming",
+      "title": "Firmware and SPI programmer tools",
+      "description": "Read, verify, erase, and write firmware with flashrom CH341A-compatible SPI programmers, AVR programmers, USB DFU, JTAG/SWD, and I2C tools.",
+      "packages": [
+        "flashrom",
+        "avrdude",
+        "dfu-util",
+        "openocd",
+        "i2c-tools"
+      ]
+    },
+    {
+      "id": "hardware_diagnostics",
+      "title": "Hardware stress and diagnostics",
+      "description": "Read sensors and exercise memory, CPU, I/O, and other hardware for troubleshooting.",
+      "packages": [
+        "lm-sensors",
+        "memtester",
+        "stress-ng"
+      ]
+    },
+    {
+      "id": "network_storage",
+      "title": "Network and enterprise storage",
+      "description": "Access NFS and SMB shares and inspect iSCSI and multipath storage.",
+      "packages": [
+        "nfs-common",
+        "cifs-utils",
+        "open-iscsi",
+        "multipath-tools"
+      ]
+    },
+    {
+      "id": "system_administration",
+      "title": "System administration tools",
+      "description": "Shell, editor, process, tracing, inventory, certificate, access-control, and monitoring utilities.",
+      "packages": [
+        "ca-certificates",
+        "gnupg",
+        "jq",
+        "less",
+        "vim-tiny",
+        "nano",
+        "tmux",
+        "screen",
+        "file",
+        "tree",
+        "lsof",
+        "strace",
+        "procps",
+        "psmisc",
+        "kmod",
+        "bash-completion",
+        "git",
+        "htop",
+        "sysstat",
+        "acl",
+        "attr",
+        "bc",
+        "pv"
+      ]
+    },
+    {
+      "id": "compression",
+      "title": "Compression tools",
+      "description": "Work with xz, zstd, and lz4 compressed images, archives, kernels, and logs.",
+      "packages": [
+        "xz-utils",
+        "zstd",
+        "lz4"
+      ]
+    }
+  ],
+  "command_packages": {
+    "blkdiscard": "util-linux",
+    "lsblk": "util-linux",
+    "wipefs": "util-linux",
+    "fdisk": "fdisk",
+    "sfdisk": "fdisk",
+    "parted": "parted",
+    "gdisk": "gdisk",
+    "nvme": "nvme-cli",
+    "mkfs.f2fs": "f2fs-tools",
+    "fsck.f2fs": "f2fs-tools",
+    "btrfs": "btrfs-progs",
+    "mkfs.xfs": "xfsprogs",
+    "xfs_repair": "xfsprogs",
+    "smartctl": "smartmontools",
+    "cryptsetup": "cryptsetup",
+    "mdadm": "mdadm",
+    "nmcli": "network-manager",
+    "nmap": "nmap",
+    "tcpdump": "tcpdump",
+    "fwupdmgr": "fwupd",
+    "flashrom": "flashrom",
+    "avrdude": "avrdude",
+    "dfu-util": "dfu-util",
+    "openocd": "openocd",
+    "i2cdetect": "i2c-tools",
+    "efibootmgr": "efibootmgr",
+    "mokutil": "mokutil",
+    "lshw": "lshw",
+    "sensors": "lm-sensors",
+    "memtester": "memtester",
+    "stress-ng": "stress-ng",
+    "mount.nfs": "nfs-common",
+    "mount.cifs": "cifs-utils",
+    "iscsiadm": "open-iscsi",
+    "multipath": "multipath-tools"
+  },
+  "notes": [
+    "The interactive application selects package groups only for supported Live or Hybrid media; Netinst and Netboot plans never receive this payload.",
+    "The remaster path installs with --no-install-recommends and cleans downloaded package archives before repacking the squashfs.",
+    "Package installation uses valid on-medium APT metadata when available and otherwise requires working configured network repositories during USB creation.",
+    "CH341A SPI flashing is provided by flashrom's ch341a_spi programmer backend and intentionally retains flashrom's root-access requirement.",
+    "Tails is intentionally excluded because modifying its root filesystem would violate its upstream image integrity and security model."
+  ]
+}

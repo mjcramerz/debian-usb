@@ -1,0 +1,215 @@
+{
+  "family_id": "debian",
+  "preserved_title": "Saved Debian Imports ...",
+  "preseed": {
+    "common_args_key": "PRESEED_COMMON_KERNEL_ARGS",
+    "preset_sets": {
+      "debian": [
+        {
+          "label": " (ROLE=Desktop,GPU=Nvidia,NET=DHCP)",
+          "args_key": "PRESEED_ONE_ARGS_DEBIAN"
+        },
+        {
+          "label": " (ROLE=Desktop,GPU=Nvidia,NET=Static)",
+          "args_key": "PRESEED_TWO_ARGS_DEBIAN"
+        },
+        {
+          "label": " (ROLE=TEST,GPU=Nvidia,NET=DHCP,BOOT=Dualboot)",
+          "args_key": "PRESEED_ELEVEN_ARGS_DEBIAN"
+        }
+      ]
+    }
+  },
+  "profiles": [
+    {
+      "profile": "debian",
+      "source_role": "primary",
+      "media_class": [
+        "live",
+        "hybrid"
+      ],
+      "preserved": {
+        "title": "Saved Debian Live Entries ...",
+        "entry_title_template": "Saved: {title}",
+        "entry_title_overrides": [
+          {
+            "match_title": "Expert install",
+            "title": "Saved Expert Install"
+          }
+        ],
+        "include_kinds": [
+          "live",
+          "installer",
+          "expert-installer",
+          "rescue"
+        ],
+        "flatten_menu_path": false
+      },
+      "menus": [
+        {
+          "title": "Debian Live (Custom Labels) ...",
+          "entries": [
+            {
+              "type": "live",
+              "title": "... Debian Live Desktop",
+              "live_toram": false,
+              "persistence_mode": "none"
+            },
+            {
+              "type": "live",
+              "title": "... Debian Live Desktop (RAM)",
+              "live_toram": true,
+              "persistence_mode": "none"
+            },
+            {
+              "type": "live",
+              "title": "... Debian Live Desktop (Encrypted Persistence)",
+              "live_toram": false,
+              "persistence_mode": "encrypted"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "profile": "debian",
+      "source_role": "netinst",
+      "media_class": "installer",
+      "legacy_entries": [
+        {
+          "type": "installer",
+          "base": "installer",
+          "title": "... Debian Netinst Install (Legacy)"
+        },
+        {
+          "type": "installer",
+          "base": "expert",
+          "title": "... Debian Netinst Expert Install (Legacy)"
+        },
+        {
+          "type": "installer",
+          "base": "rescue",
+          "title": "... Debian Netinst Rescue Environment (Legacy)"
+        }
+      ],
+      "menus": [
+        {
+          "title": "Debian Netinst (Custom Labels) ...",
+          "entries": [
+            {
+              "type": "installer",
+              "base": "installer",
+              "title": "... Debian Netinst Install (Direct)"
+            },
+            {
+              "type": "installer",
+              "base": "expert",
+              "title": "... Debian Netinst Expert Install (Direct)"
+            },
+            {
+              "type": "preseed-preset-menu",
+              "title": "Debian Netinst Install (HTTP Preseed) ...",
+              "base": "installer",
+              "transport": "http",
+              "title_prefix": "... Debian Netinst Install",
+              "preset_set": "debian",
+              "network_menus": [
+                {
+                  "title": "Office LAN ...",
+                  "args_key": "PRESEED_ETHERNET_KERNEL_ARGS"
+                },
+                {
+                  "title": "Office Wi-Fi ...",
+                  "args_key": "PRESEED_WIFI_KERNEL_ARGS"
+                }
+              ]
+            },
+            {
+              "type": "preseed-preset-menu",
+              "title": "Debian Netinst Install (USB Preseed) ...",
+              "base": "installer",
+              "transport": "usb",
+              "title_prefix": "... Debian Netinst Install",
+              "preset_set": "debian",
+              "network_menus": [
+                {
+                  "title": "Offline LAN ...",
+                  "args_key": "PRESEED_ETHERNET_KERNEL_ARGS"
+                },
+                {
+                  "title": "Offline Wi-Fi ...",
+                  "args_key": "PRESEED_WIFI_KERNEL_ARGS"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "profile": "debian",
+      "source_role": "netboot",
+      "media_class": "installer",
+      "legacy_entries": [
+        {
+          "type": "installer",
+          "base": "installer",
+          "title": "... Debian Netboot Install (Legacy)"
+        },
+        {
+          "type": "installer",
+          "base": "expert",
+          "title": "... Debian Netboot Expert Install (Legacy)"
+        },
+        {
+          "type": "installer",
+          "base": "rescue",
+          "title": "... Debian Netboot Rescue Environment (Legacy)"
+        }
+      ],
+      "menus": [
+        {
+          "title": "Debian Netboot (Custom Labels) ...",
+          "entries": [
+            {
+              "type": "preseed-preset-menu",
+              "title": "Debian Netboot Install (HTTP Preseed) ...",
+              "base": "installer",
+              "transport": "http",
+              "title_prefix": "... Debian Netboot Install",
+              "preset_set": "debian",
+              "network_menus": [
+                {
+                  "title": "Remote LAN ...",
+                  "args_key": "PRESEED_ETHERNET_KERNEL_ARGS"
+                },
+                {
+                  "title": "Remote Wi-Fi ...",
+                  "args_key": "PRESEED_WIFI_KERNEL_ARGS"
+                }
+              ]
+            },
+            {
+              "type": "preseed-preset-menu",
+              "title": "Debian Netboot Install (USB Preseed) ...",
+              "base": "installer",
+              "transport": "usb",
+              "title_prefix": "... Debian Netboot Install",
+              "preset_set": "debian",
+              "network_menus": [
+                {
+                  "title": "Field LAN ...",
+                  "args_key": "PRESEED_ETHERNET_KERNEL_ARGS"
+                },
+                {
+                  "title": "Field Wi-Fi ...",
+                  "args_key": "PRESEED_WIFI_KERNEL_ARGS"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

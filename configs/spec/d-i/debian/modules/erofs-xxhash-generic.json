@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "name": "Debian d-i EROFS and xxhash modules",
+  "description": "Repo-managed Debian Installer module profile for EROFS media support and xxhash-backed kernel modules.",
+  "distro": "debian",
+  "stage": "d-i",
+  "kind": "modules",
+  "enabled_by_default": true,
+  "module_names": [
+    "erofs",
+    "xxhash",
+    "xxhash_generic"
+  ],
+  "live_initramfs_modules": [],
+  "module_alias_candidates": [
+    "xxhash64",
+    "xxhash64-generic",
+    "xxhash_generic",
+    "crypto-xxhash64",
+    "crypto-xxhash64-generic",
+    "crypto_xxhash64",
+    "crypto_xxhash64_generic"
+  ],
+  "kernel_config_symbols": [
+    "CONFIG_EROFS_FS",
+    "CONFIG_EROFS_FS_XATTR",
+    "CONFIG_EROFS_FS_ZIP",
+    "CONFIG_XXHASH",
+    "CONFIG_CRYPTO_XXHASH"
+  ],
+  "extra_chroot_packages": [],
+  "extra_binary_packages": [],
+  "local_deb_dir": "",
+  "local_udeb_dir": "",
+  "udeb_rebuild_spec_path": "erofs-xxhash-generic.udeb-rebuild.json",
+  "source_overlay_dir": "overlays/erofs-xxhash-generic",
+  "kernel_version": "",
+  "notes": [
+    "Use this profile when Debian Installer needs erofs, xxhash, and xxhash_generic support staged through installer kernel udebs.",
+    "The paired UDEB rebuild spec updates Debian linux installer module lists and can be overridden with a different source overlay directory during the Build ISO flow."
+  ]
+}

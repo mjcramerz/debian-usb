@@ -1,0 +1,299 @@
+{
+  "family_id": "kali",
+  "preserved_title": "Kali Legacy ...",
+  "preseed": {
+    "common_args_key": "PRESEED_COMMON_KERNEL_ARGS",
+    "preset_sets": {
+      "kali": [
+        {
+          "label": " (ROLE=Desktop,GPU=Nvidia,NET=DHCP)",
+          "args_key": "PRESEED_ONE_ARGS_KALI"
+        },
+        {
+          "label": " (ROLE=Desktop,GPU=Nvidia,NET=Static)",
+          "args_key": "PRESEED_TWO_ARGS_KALI"
+        },
+        {
+          "label": " (ROLE=Desktop,GPU=Nvidia,NET=DHCP,BOOT=Dualboot)",
+          "args_key": "PRESEED_THREE_ARGS_KALI"
+        },
+        {
+          "label": " (ROLE=Desktop,GPU=Auto,NET=Static,BOOT=Dualboot)",
+          "args_key": "PRESEED_FOUR_ARGS_KALI"
+        },
+        {
+          "label": " (ROLE=Desktop,GPU=Auto,NET=Static,REMOTE=SSH)",
+          "args_key": "PRESEED_FIVE_ARGS_KALI"
+        },
+        {
+          "label": " (ROLE=Server,GPU=Nvidia,NET=Static,REMOTE=SSH)",
+          "args_key": "PRESEED_SIX_ARGS_KALI"
+        },
+        {
+          "label": " (ROLE=Server,GPU=Nvidia,NET=Static,REMOTE=SSH,BOOT=Dualboot)",
+          "args_key": "PRESEED_SEVEN_ARGS_KALI"
+        },
+        {
+          "label": " (ROLE=Server,GPU=Auto,NET=DHCP,REMOTE=SSH,BOOT=Dualboot)",
+          "args_key": "PRESEED_EIGHT_ARGS_KALI"
+        },
+        {
+          "label": " (ROLE=Server,GPU=Auto,NET=Static,REMOTE=SSH,BOOT=Dualboot)",
+          "args_key": "PRESEED_NINE_ARGS_KALI"
+        }
+      ]
+    }
+  },
+  "profiles": [
+    {
+      "profile": "kali-linux",
+      "source_role": "primary",
+      "media_class": [
+        "live",
+        "hybrid"
+      ],
+      "menus": [
+        {
+          "title": "Kali Live ...",
+          "entries": [
+            {
+              "type": "live",
+              "title": "... Kali Live Environment",
+              "live_toram": false,
+              "persistence_mode": "none"
+            },
+            {
+              "type": "live",
+              "title": "... Kali Live Environment (RAM)",
+              "live_toram": true,
+              "persistence_mode": "none"
+            },
+            {
+              "type": "live",
+              "title": "... Kali Live Environment (Persistence)",
+              "live_toram": false,
+              "persistence_mode": "plain"
+            },
+            {
+              "type": "live",
+              "title": "... Kali Live Environment (RAM + Persistence)",
+              "live_toram": true,
+              "persistence_mode": "plain"
+            },
+            {
+              "type": "live",
+              "title": "... Kali Live Environment (Encrypted Persistence)",
+              "live_toram": false,
+              "persistence_mode": "encrypted"
+            },
+            {
+              "type": "live",
+              "title": "... Kali Live Environment (RAM + Encrypted Persistence)",
+              "live_toram": true,
+              "persistence_mode": "encrypted"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "profile": "kali-linux",
+      "source_role": "netinst",
+      "media_class": "installer",
+      "legacy_entries": [
+        {
+          "type": "installer",
+          "base": "installer",
+          "title": "... Kali Netinst Install"
+        },
+        {
+          "type": "installer",
+          "base": "expert",
+          "title": "... Kali Netinst Expert Install"
+        },
+        {
+          "type": "installer",
+          "base": "rescue",
+          "title": "... Kali Netinst Rescue Environment"
+        }
+      ],
+      "menus": [
+        {
+          "title": "Kali Netinst ...",
+          "entries": [
+            {
+              "type": "preseed-preset-menu",
+              "title": "Kali Netinst Install (HTTP Preseed) ...",
+              "base": "installer",
+              "transport": "http",
+              "title_prefix": "... Kali Netinst Install",
+              "preset_set": "kali",
+              "network_menus": [
+                {
+                  "title": "Preseed Internal ...",
+                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "title": "Preseed Public ...",
+                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                }
+              ]
+            },
+            {
+              "type": "preseed-preset-menu",
+              "title": "Kali Netinst Install (USB Preseed) ...",
+              "base": "installer",
+              "transport": "usb",
+              "title_prefix": "... Kali Netinst Install",
+              "preset_set": "kali",
+              "network_menus": [
+                {
+                  "title": "Preseed Internal ...",
+                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "title": "Preseed Public ...",
+                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "profile": "kali-linux",
+      "source_role": "netboot",
+      "media_class": "installer",
+      "legacy_entries": [
+        {
+          "type": "installer",
+          "base": "installer",
+          "title": "... Kali Netboot Install"
+        },
+        {
+          "type": "installer",
+          "base": "expert",
+          "title": "... Kali Netboot Expert Install"
+        },
+        {
+          "type": "installer",
+          "base": "rescue",
+          "title": "... Kali Netboot Rescue Environment"
+        }
+      ],
+      "menus": [
+        {
+          "title": "Kali Netboot ...",
+          "entries": [
+            {
+              "type": "preseed-preset-menu",
+              "title": "Kali Netboot Install (HTTP Preseed) ...",
+              "base": "installer",
+              "transport": "http",
+              "title_prefix": "... Kali Netboot Install",
+              "preset_set": "kali",
+              "network_menus": [
+                {
+                  "title": "Preseed Internal ...",
+                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "title": "Preseed Public ...",
+                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                }
+              ]
+            },
+            {
+              "type": "preseed-preset-menu",
+              "title": "Kali Netboot Install (USB Preseed) ...",
+              "base": "installer",
+              "transport": "usb",
+              "title_prefix": "... Kali Netboot Install",
+              "preset_set": "kali",
+              "network_menus": [
+                {
+                  "title": "Preseed Internal ...",
+                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "title": "Preseed Public ...",
+                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "profile": "kali-purple",
+      "source_role": "primary",
+      "media_class": "installer",
+      "menus": [
+        {
+          "title": "Kali Purple Installer ...",
+          "entries": [
+            {
+              "type": "installer",
+              "base": "installer",
+              "title": "... Kali Purple Installer"
+            },
+            {
+              "type": "installer",
+              "base": "expert",
+              "title": "... Kali Purple Expert Install"
+            },
+            {
+              "type": "installer",
+              "base": "rescue",
+              "title": "... Kali Purple Rescue Environment"
+            },
+            {
+              "type": "preseed-preset-menu",
+              "title": "Kali Purple Installer (HTTP Preseed) ...",
+              "base": "installer",
+              "transport": "http",
+              "title_prefix": "... Kali Purple Installer",
+              "preset_set": "kali",
+              "network_menus": [
+                {
+                  "title": "Preseed Internal ...",
+                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "title": "Preseed Public ...",
+                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                }
+              ]
+            },
+            {
+              "type": "preseed-preset-menu",
+              "title": "Kali Purple Installer (USB Preseed) ...",
+              "base": "installer",
+              "transport": "usb",
+              "title_prefix": "... Kali Purple Installer",
+              "preset_set": "kali",
+              "network_menus": [
+                {
+                  "title": "Preseed Internal ...",
+                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "title": "Preseed Public ...",
+                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

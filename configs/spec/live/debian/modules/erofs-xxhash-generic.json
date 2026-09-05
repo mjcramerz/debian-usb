@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "name": "Debian live EROFS and xxhash modules",
+  "description": "Repo-managed live initramfs module profile for EROFS media support and xxhash-backed kernel modules.",
+  "distro": "debian",
+  "stage": "live",
+  "kind": "modules",
+  "enabled_by_default": true,
+  "module_names": [
+    "erofs",
+    "xxhash",
+    "xxhash_generic"
+  ],
+  "live_initramfs_modules": [
+    "erofs",
+    "xxhash",
+    "xxhash_generic"
+  ],
+  "module_alias_candidates": [
+    "xxhash64",
+    "xxhash64-generic",
+    "xxhash_generic",
+    "crypto-xxhash64",
+    "crypto-xxhash64-generic",
+    "crypto_xxhash64",
+    "crypto_xxhash64_generic"
+  ],
+  "kernel_config_symbols": [
+    "CONFIG_EROFS_FS",
+    "CONFIG_EROFS_FS_XATTR",
+    "CONFIG_EROFS_FS_ZIP",
+    "CONFIG_XXHASH",
+    "CONFIG_CRYPTO_XXHASH"
+  ],
+  "extra_chroot_packages": [],
+  "extra_binary_packages": [],
+  "local_deb_dir": "",
+  "local_udeb_dir": "",
+  "udeb_rebuild_spec_path": "",
+  "source_overlay_dir": "",
+  "kernel_version": "",
+  "notes": [
+    "Use this profile when the live ISO root filesystem or initramfs must carry erofs and xxhash support.",
+    "The Build ISO flow can inspect the exact target kernel version against /lib/modules or a downloaded cache before the build starts."
+  ]
+}

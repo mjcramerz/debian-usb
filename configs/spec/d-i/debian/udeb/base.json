@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "Debian d-i udeb defaults",
+  "description": "Placeholder Debian Installer .udeb profile for repo-managed localudeb or rebuild inputs.",
+  "distro": "debian",
+  "stage": "d-i",
+  "kind": "udeb",
+  "enabled_by_default": true,
+  "module_names": [],
+  "live_initramfs_modules": [],
+  "module_alias_candidates": [],
+  "kernel_config_symbols": [],
+  "extra_chroot_packages": [],
+  "extra_binary_packages": [],
+  "local_deb_dir": "",
+  "local_udeb_dir": "",
+  "udeb_rebuild_spec_path": "",
+  "source_overlay_dir": "",
+  "kernel_version": "",
+  "notes": [
+    "Populate this profile with local udeb directories or rebuild specs when Debian Installer needs non-kernel installer components."
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "rebuilds": [
+    {
+      "rebuild_kind": "linux-installer-kernel",
+      "source_package": "linux",
+      "source_overlay_dir": "overlays/erofs-xxhash-generic",
+      "module_targets": [
+        {
+          "path": "debian/installer/modules/kernel-image",
+          "modules": [
+            "erofs",
+            "xxhash",
+            "xxhash_generic"
+          ],
+          "merge_strategy": "append-unique"
+        },
+        {
+          "path": "debian/installer/modules/amd64/kernel-image",
+          "modules": [
+            "erofs",
+            "xxhash",
+            "xxhash_generic"
+          ],
+          "merge_strategy": "append-unique"
+        }
+      ],
+      "package_list_append_text": "Package: erofs-modules\nKernel-Version: yes",
+      "pkg_list_local_entries": [
+        "erofs-modules"
+      ]
+    }
+  ]
+}

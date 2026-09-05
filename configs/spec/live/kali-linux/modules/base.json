@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "Kali live module placeholder",
+  "description": "Placeholder Kali live module profile for future Build ISO work.",
+  "distro": "kali-linux",
+  "stage": "live",
+  "kind": "modules",
+  "enabled_by_default": false,
+  "module_names": [],
+  "live_initramfs_modules": [],
+  "module_alias_candidates": [],
+  "kernel_config_symbols": [],
+  "extra_chroot_packages": [],
+  "extra_binary_packages": [],
+  "local_deb_dir": "",
+  "local_udeb_dir": "",
+  "udeb_rebuild_spec_path": "",
+  "source_overlay_dir": "",
+  "kernel_version": "",
+  "notes": [
+    "Kali Purple does not currently support a live Build ISO path in this repo, so this placeholder primarily targets Kali Linux."
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "family_id": "tails",
+  "preserved_title": "Tails Legacy ...",
+  "profiles": [
+    {
+      "profile": "tails",
+      "source_role": "primary",
+      "media_class": [
+        "live",
+        "hybrid"
+      ],
+      "title": "Tails",
+      "menu_kind": "live-basic",
+      "labels": {
+        "live": "Tails Live",
+        "live_ram": "Tails Live (RAM)"
+      },
+      "menus": [
+        {
+          "title": "Tails Live ...",
+          "entries": [
+            {
+              "type": "live",
+              "title": "... Tails Live Environment",
+              "live_toram": false,
+              "persistence_mode": "none"
+            },
+            {
+              "type": "live",
+              "title": "... Tails Live Environment (RAM)",
+              "live_toram": true,
+              "persistence_mode": "none"
+            },
+            {
+              "type": "live",
+              "title": "... Tails Live Environment (Persistence)",
+              "live_toram": false,
+              "persistence_mode": "plain"
+            },
+            {
+              "type": "live",
+              "title": "... Tails Live Environment (RAM + Persistence)",
+              "live_toram": true,
+              "persistence_mode": "plain"
+            },
+            {
+              "type": "live",
+              "title": "... Tails Live Environment (Encrypted Persistence)",
+              "live_toram": false,
+              "persistence_mode": "encrypted"
+            },
+            {
+              "type": "live",
+              "title": "... Tails Live Environment (RAM + Encrypted Persistence)",
+              "live_toram": true,
+              "persistence_mode": "encrypted"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

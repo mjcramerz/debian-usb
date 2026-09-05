@@ -1,0 +1,234 @@
+{
+  "family_id": "debian",
+  "preserved_title": "Debian Legacy ...",
+  "preseed": {
+    "common_args_key": "PRESEED_COMMON_KERNEL_ARGS",
+    "preset_sets": {
+      "debian": [
+        {
+          "label": " [BTRFS Desktop][Main][479GiB Disk + 47935MiB RAM]",
+          "args_key": "PRESEED_ONE_ARGS_DEBIAN"
+        },
+        {
+          "label": " [BTRFS Desktop][Main][Encrypted][479GiB Disk + 47935MiB RAM]",
+          "args_key": "PRESEED_TWO_ARGS_DEBIAN"
+        },
+        {
+          "label": " [BTRFS Desktop][Main][Dualboot][379GiB Disk + 47935MiB RAM]",
+          "args_key": "PRESEED_THREE_ARGS_DEBIAN"
+        },
+        {
+          "label": " [BTRFS Desktop][Flex][Dualboot][379GiB Disk + 7489MiB RAM]",
+          "args_key": "PRESEED_FOUR_ARGS_DEBIAN"
+        },
+        {
+          "label": " [F2FS Desktop][Cbook][32GiB Disk + 3424MiB RAM]",
+          "args_key": "PRESEED_FIVE_ARGS_DEBIAN"
+        },
+        {
+          "label": " [BTRFS Server - GitLab Runner]",
+          "args_key": "PRESEED_SIX_ARGS_DEBIAN"
+        },
+        {
+          "label": " [F2FS Server - Pi-Hole]",
+          "args_key": "PRESEED_SEVEN_ARGS_DEBIAN"
+        },
+        {
+          "label": " [PLACEHOLDER]",
+          "args_key": "PRESEED_EIGHT_ARGS_DEBIAN"
+        },
+        {
+          "label": " [PLACEHOLDER]",
+          "args_key": "PRESEED_NINE_ARGS_DEBIAN"
+        }
+      ]
+    }
+  },
+  "profiles": [
+    {
+      "profile": "debian",
+      "source_role": "primary",
+      "media_class": [
+        "live",
+        "hybrid"
+      ],
+      "menus": [
+        {
+          "title": "Debian Live ...",
+          "entries": [
+            {
+              "type": "live",
+              "title": "... Debian Live Environment",
+              "live_toram": false,
+              "persistence_mode": "none"
+            },
+            {
+              "type": "live",
+              "title": "... Debian Live Environment (RAM)",
+              "live_toram": true,
+              "persistence_mode": "none"
+            },
+            {
+              "type": "live",
+              "title": "... Debian Live Environment (Persistence)",
+              "live_toram": false,
+              "persistence_mode": "plain"
+            },
+            {
+              "type": "live",
+              "title": "... Debian Live Environment (RAM + Persistence)",
+              "live_toram": true,
+              "persistence_mode": "plain"
+            },
+            {
+              "type": "live",
+              "title": "... Debian Live Environment (Encrypted Persistence)",
+              "live_toram": false,
+              "persistence_mode": "encrypted"
+            },
+            {
+              "type": "live",
+              "title": "... Debian Live Environment (RAM + Encrypted Persistence)",
+              "live_toram": true,
+              "persistence_mode": "encrypted"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "profile": "debian",
+      "source_role": "netinst",
+      "media_class": "installer",
+      "legacy_entries": [
+        {
+          "type": "installer",
+          "base": "installer",
+          "title": "... Debian Netinst Install"
+        },
+        {
+          "type": "installer",
+          "base": "expert",
+          "title": "... Debian Netinst Expert Install"
+        },
+        {
+          "type": "installer",
+          "base": "rescue",
+          "title": "... Debian Netinst Rescue Environment"
+        }
+      ],
+      "menus": [
+        {
+          "title": "Debian Netinst ...",
+          "entries": [
+            {
+              "type": "preseed-preset-menu",
+              "title": "Debian Netinst Install (HTTP Preseed) ...",
+              "base": "installer",
+              "transport": "http",
+              "title_prefix": "... Debian Netinst Install",
+              "preset_set": "debian",
+              "network_menus": [
+                {
+                  "title": "Preseed Internal ...",
+                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "title": "Preseed Public ...",
+                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                }
+              ]
+            },
+            {
+              "type": "preseed-preset-menu",
+              "title": "Debian Netinst Install (USB Preseed) ...",
+              "base": "installer",
+              "transport": "usb",
+              "title_prefix": "... Debian Netinst Install",
+              "preset_set": "debian",
+              "network_menus": [
+                {
+                  "title": "Preseed Internal ...",
+                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "title": "Preseed Public ...",
+                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "profile": "debian",
+      "source_role": "netboot",
+      "media_class": "installer",
+      "legacy_entries": [
+        {
+          "type": "installer",
+          "base": "installer",
+          "title": "... Debian Netboot Install"
+        },
+        {
+          "type": "installer",
+          "base": "expert",
+          "title": "... Debian Netboot Expert Install"
+        },
+        {
+          "type": "installer",
+          "base": "rescue",
+          "title": "... Debian Netboot Rescue Environment"
+        }
+      ],
+      "menus": [
+        {
+          "title": "Debian Netboot ...",
+          "entries": [
+            {
+              "type": "preseed-preset-menu",
+              "title": "Debian Netboot Install (HTTP Preseed) ...",
+              "base": "installer",
+              "transport": "http",
+              "title_prefix": "... Debian Netboot Install",
+              "preset_set": "debian",
+              "network_menus": [
+                {
+                  "title": "Preseed Internal ...",
+                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "title": "Preseed Public ...",
+                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                }
+              ]
+            },
+            {
+              "type": "preseed-preset-menu",
+              "title": "Debian Netboot Install (USB Preseed) ...",
+              "base": "installer",
+              "transport": "usb",
+              "title_prefix": "... Debian Netboot Install",
+              "preset_set": "debian",
+              "network_menus": [
+                {
+                  "title": "Preseed Internal ...",
+                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "title": "Preseed Public ...",
+                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

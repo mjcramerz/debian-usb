@@ -1,0 +1,110 @@
+{
+  "timeout": -1,
+  "top_level_families": [
+    {
+      "id": "debian",
+      "title": "Debian ..."
+    },
+    {
+      "id": "kali",
+      "title": "Kali ..."
+    },
+    {
+      "id": "tails",
+      "title": "Tails ..."
+    },
+    {
+      "id": "ubuntu",
+      "title": "Ubuntu ..."
+    }
+  ],
+  "static_entries": [
+    {
+      "id": "internal-drive",
+      "title": "Boot from Internal Drive",
+      "modules": [
+        "part_gpt",
+        "part_msdos",
+        "fat",
+        "ext2",
+        "btrfs",
+        "xfs",
+        "regexp",
+        "configfile",
+        "chain",
+        "search",
+        "search_fs_file",
+        "search_fs_uuid",
+        "search_label",
+        "probe",
+        "test"
+      ],
+      "config_paths": [
+        "/boot/grub/custom.cfg",
+        "/boot/grub/grub.cfg"
+      ],
+      "efi_loaders": [
+        {
+          "title": "Debian Secure Boot shim",
+          "path": "/EFI/debian/shimx64.efi"
+        },
+        {
+          "title": "Debian GRUB",
+          "path": "/EFI/debian/grubx64.efi"
+        },
+        {
+          "title": "Ubuntu Secure Boot shim",
+          "path": "/EFI/ubuntu/shimx64.efi"
+        },
+        {
+          "title": "Ubuntu GRUB",
+          "path": "/EFI/ubuntu/grubx64.efi"
+        },
+        {
+          "title": "Kali Secure Boot shim",
+          "path": "/EFI/kali/shimx64.efi"
+        },
+        {
+          "title": "Kali GRUB",
+          "path": "/EFI/kali/grubx64.efi"
+        },
+        {
+          "title": "Windows Boot Manager",
+          "path": "/EFI/Microsoft/Boot/bootmgfw.efi"
+        },
+        {
+          "title": "Fallback UEFI Boot Loader",
+          "path": "/EFI/BOOT/BOOTX64.EFI"
+        }
+      ]
+    },
+    {
+      "id": "mok",
+      "title": "MOK Enrollment"
+    },
+    {
+      "id": "updatevars",
+      "title": "UEFI Keys",
+      "entries": [
+        {
+          "id": "user-mode",
+          "title": "UEFI Keys User Mode (PK Installed) [.auth]"
+        },
+        {
+          "id": "setup-mode",
+          "title": "UEFI Keys Setup Mode (PK Not Installed) [.esl]"
+        }
+      ]
+    },
+    {
+      "id": "uefi",
+      "title": "UEFI Settings"
+    }
+  ],
+  "raw_iso_redirect": [
+    {
+      "id": "managed-usb-menu",
+      "title": "Managed USB Installer Menu"
+    }
+  ]
+}

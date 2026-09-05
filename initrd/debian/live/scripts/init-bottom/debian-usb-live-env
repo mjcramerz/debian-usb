@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+IFS=$(printf '\n\t')
+
+du_live_env_copy() (
+  source_path=$1
+  target_path=$2
+  target_dir=${target_path%/*}
+  temporary_path="${target_path}.tmp.$$"
+
+  umask 077
+  mkdir -p "${target_dir}" >/dev/null 2>&1 || return 0
+  trap 'rm -f "${temporary_path}"' 0 HUP INT TERM
+  cat "${source_path}" >"${temporary_path}" 2>/dev/null || return 0
+  chmod 0600 "${temporary_path}" >/dev/null 2>&1 || return 0
+  mv -f "${temporary_path}" "${target_path}" >/dev/null 2>&1 || return 0
+  trap - 0 HUP INT TERM
+)
+
+du_live_env_main() {
+  case ${1:-} in
+    prereqs) return 0 ;;
+  esac
+  du_live_env_copy /live.env /run/initramfs/debian-usb/live.env
+}
+
+if [ "${DEBIAN_USB_INIT_BOTTOM_SOURCE_ONLY:-0}" != 1 ]; then
+  du_live_env_main "${1:-}"
+  exit 0
+fi

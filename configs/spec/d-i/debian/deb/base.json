@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "name": "Debian d-i deb package defaults",
+  "description": "Placeholder Debian Installer .deb profile for future package-oriented d-i customizations.",
+  "distro": "debian",
+  "stage": "d-i",
+  "kind": "deb",
+  "enabled_by_default": true,
+  "module_names": [],
+  "live_initramfs_modules": [],
+  "module_alias_candidates": [],
+  "kernel_config_symbols": [],
+  "extra_chroot_packages": [],
+  "extra_binary_packages": [],
+  "local_deb_dir": "",
+  "local_udeb_dir": "",
+  "udeb_rebuild_spec_path": "",
+  "source_overlay_dir": "",
+  "kernel_version": "",
+  "notes": [
+    "Populate this profile when Debian Installer needs companion .deb payloads or package-list defaults beyond module-only changes."
+  ]
+}

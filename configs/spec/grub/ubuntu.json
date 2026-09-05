@@ -1,0 +1,115 @@
+{
+  "family_id": "ubuntu",
+  "profiles": [
+    {
+      "profile": "ubuntu-desktop",
+      "source_role": "primary",
+      "media_class": [
+        "live",
+        "hybrid"
+      ],
+      "title": "Ubuntu Desktop",
+      "menu_kind": "live-basic",
+      "labels": {
+        "live": "Ubuntu Desktop",
+        "live_ram": "Ubuntu Desktop (RAM)",
+        "persistence": "Ubuntu Desktop (Persistence)",
+        "preseed_default": "Ubuntu Desktop Preseed (Default)"
+      },
+      "submenus": {
+        "online": {
+          "title": "Ubuntu Desktop (Online Preseed) ...",
+          "entry": "Ubuntu Desktop (Online Preseed)"
+        },
+        "offline": {
+          "title": "Ubuntu Desktop (Offline Preseed) ...",
+          "entry": "Ubuntu Desktop (Offline Preseed)"
+        }
+      },
+      "preserved": {
+        "title": "Preserved Ubuntu Desktop",
+        "entry_title_template": "{title}"
+      }
+    },
+    {
+      "profile": "ubuntu-desktop",
+      "source_role": "netinst",
+      "media_class": "installer",
+      "title": "Ubuntu Desktop Netinst ...",
+      "menu_kind": "family-installer-submenu",
+      "labels": {
+        "normal": "Ubuntu Desktop Netinst (Normal Install)",
+        "expert": "Ubuntu Desktop Netinst (Expert Install)",
+        "rescue": "Ubuntu Desktop Netinst (Rescue Environment)",
+        "preseed_default": "Ubuntu Desktop Netinst Preseed (Default)"
+      },
+      "submenus": {
+        "online": {
+          "title": "Ubuntu Desktop Netinst (Online Preseed) ..."
+        },
+        "offline": {
+          "title": "Ubuntu Desktop Netinst (Offline Preseed) ..."
+        }
+      },
+      "preserved": {
+        "title": "Preserved Ubuntu Desktop Netinst ...",
+        "entry_title_template": "{title}"
+      }
+    },
+    {
+      "profile": "ubuntu-server",
+      "source_role": "primary",
+      "media_class": [
+        "live",
+        "hybrid",
+        "installer"
+      ],
+      "title": "Ubuntu Server",
+      "menu_kind": "live-basic",
+      "labels": {
+        "live": "Ubuntu Server",
+        "live_ram": "Ubuntu Server (RAM)",
+        "preseed_default": "Ubuntu Server Preseed (Default)"
+      },
+      "submenus": {
+        "online": {
+          "title": "Ubuntu Server (Online Preseed) ...",
+          "entry": "Ubuntu Server (Online Preseed)"
+        },
+        "offline": {
+          "title": "Ubuntu Server (Offline Preseed) ...",
+          "entry": "Ubuntu Server (Offline Preseed)"
+        }
+      },
+      "preserved": {
+        "title": "Preserved Ubuntu Server",
+        "entry_title_template": "{title}"
+      }
+    },
+    {
+      "profile": "ubuntu-server",
+      "source_role": "netinst",
+      "media_class": "installer",
+      "title": "Ubuntu Server Netinst ...",
+      "menu_kind": "family-installer-submenu",
+      "labels": {
+        "normal": "Ubuntu Server Netinst (Normal Install)",
+        "expert": "Ubuntu Server Netinst (Expert Install)",
+        "rescue": "Ubuntu Server Netinst (Rescue Environment)",
+        "preseed_default": "Ubuntu Server Netinst Preseed (Default)"
+      },
+      "submenus": {
+        "online": {
+          "title": "Ubuntu Server Netinst (Online Preseed) ..."
+        },
+        "offline": {
+          "title": "Ubuntu Server Netinst (Offline Preseed) ..."
+        }
+      },
+      "preserved": {
+        "title": "Preserved Ubuntu Server Netinst ...",
+        "entry_title_template": "{title}"
+      }
+    }
+  ]
+}
