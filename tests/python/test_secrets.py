@@ -331,6 +331,55 @@ class SecretsScriptTests(unittest.TestCase):
         self.assertEqual(self.live.read_text(encoding="utf-8"), self.original_live)
         self.assert_auxiliary_files_cleared()
 
+    def test_clear_initrd_clears_arbitrary_env_and_conf_secret_assignments(self) -> None:
+        custom_dir = self.repo / "initrd/custom/netboot"
+        custom_dir.mkdir(parents=True)
+        access_value = "custom-access-fixture"
+        token_value = "custom-token-fixture"
+        env_path = custom_dir / "credentials.env.local"
+        env_path.write_text(
+            f"PRESEED_CF_ACCESS_KEY='{access_value}'\n"
+            "OPAQUE_KEY='opaque-key-fixture'\n"
+            "DEPLOYMENT_REGION='eu-north-1'\n",
+            encoding="utf-8",
+        )
+        conf_path = custom_dir / "service.conf.backup"
+        conf_path.write_text(
+            f"api_token = {token_value} # retained comment\n"
+            "PUBLIC_KEY_PASSWORD = 'public-key-password-fixture'\n"
+            "PUBLIC_GPG_KEY = 'public-fixture'\n",
+            encoding="utf-8",
+        )
+        ignored_path = custom_dir / "service.ini"
+        ignored_original = "api_token=ignored-token-fixture\n"
+        ignored_path.write_text(ignored_original, encoding="utf-8")
+        config_before = self.config.read_bytes()
+
+        result = self.run_script("--clear-initrd")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            env_path.read_text(encoding="utf-8"),
+            "PRESEED_CF_ACCESS_KEY=''\nOPAQUE_KEY=''\nDEPLOYMENT_REGION='eu-north-1'\n",
+        )
+        self.assertEqual(
+            conf_path.read_text(encoding="utf-8"),
+            "api_token = '' # retained comment\n"
+            "PUBLIC_KEY_PASSWORD = ''\n"
+            "PUBLIC_GPG_KEY = 'public-fixture'\n",
+        )
+        self.assertEqual(ignored_path.read_text(encoding="utf-8"), ignored_original)
+        self.assertEqual(self.config.read_bytes(), config_before)
+        self.assertIn("PRESEED_CF_ACCESS_KEY", result.stdout)
+        self.assertIn("api_token", result.stdout)
+        self.assertIn("OPAQUE_KEY", result.stdout)
+        self.assertIn("initrd/custom/netboot/credentials.env.local", result.stdout)
+        self.assertIn("initrd/custom/netboot/service.conf.backup", result.stdout)
+        self.assertNotIn(access_value, result.stdout + result.stderr)
+        self.assertNotIn(token_value, result.stdout + result.stderr)
+        self.assertNotIn("opaque-key-fixture", result.stdout + result.stderr)
+        self.assertNotIn("public-key-password-fixture", result.stdout + result.stderr)
+
     def test_optional_backup_symlink_is_ignored_without_following_or_failure(self) -> None:
         outside = Path(self.temp_dir.name) / "outside.conf"
         outside.write_text("root_password=outside-secret\n", encoding="utf-8")

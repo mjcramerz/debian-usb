@@ -74,7 +74,7 @@ check: export PYTHONDONTWRITEBYTECODE := 1
 check:
 	@go test ./...
 	@PYTHONWARNDEFAULTENCODING=1 PYTHONWARNINGS='error::EncodingWarning' PYTHONPATH='$(CURDIR)/src/python' python3 -m unittest discover -s tests/python
-	@dash -n secrets.sh .githooks/pre-push scripts/install-git-hooks.sh scripts/debian-usb-python scripts/install.sh scripts/make-host.sh scripts/write_usb.sh scripts/build_iso.sh config-hooks/0500-apt-live-medium.sh config-hooks/1000-network-wifi.sh tests/shell/test_live_apt_hook.sh tests/shell/test_live_wifi_hook.sh tests/shell/test_multios_live_tools.sh tests/shell/test_device_release.sh
+	@dash -n secrets.sh .githooks/pre-commit .githooks/pre-push scripts/install-git-hooks.sh scripts/debian-usb-python scripts/install.sh scripts/make-host.sh scripts/write_usb.sh scripts/build_iso.sh config-hooks/0500-apt-live-medium.sh config-hooks/1000-network-wifi.sh tests/shell/test_live_apt_hook.sh tests/shell/test_live_wifi_hook.sh tests/shell/test_multios_live_tools.sh tests/shell/test_device_release.sh
 	@sh tests/shell/test_live_apt_hook.sh >/dev/null
 	@sh tests/shell/test_live_wifi_hook.sh >/dev/null
 	@sh tests/shell/test_multios_live_tools.sh >/dev/null

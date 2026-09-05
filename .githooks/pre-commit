@@ -1,0 +1,23 @@
+#!/bin/sh
+# debian-usb managed pre-commit hook
+IFS=$(printf '\n\t')
+export LC_ALL=C
+
+if ! repo_root=$(git rev-parse --show-toplevel 2>/dev/null); then
+  printf '%s\n' 'debian-usb pre-commit: unable to resolve repository root; continuing without blocking commit' >&2
+  exit 0
+fi
+if [ -z "${repo_root}" ] || [ "${repo_root}" = / ]; then
+  printf '%s\n' 'debian-usb pre-commit: unsafe repository root; continuing without blocking commit' >&2
+  exit 0
+fi
+if [ ! -x "${repo_root}/secrets.sh" ]; then
+  printf '%s\n' 'debian-usb pre-commit: missing executable secrets.sh; continuing without blocking commit' >&2
+  exit 0
+fi
+
+printf '%s\n' 'debian-usb pre-commit: clearing initrd .env/.conf secret values'
+if ! "${repo_root}/secrets.sh" --clear-initrd --index; then
+  printf '%s\n' 'debian-usb pre-commit: secret clearing failed; continuing without blocking commit' >&2
+fi
+exit 0

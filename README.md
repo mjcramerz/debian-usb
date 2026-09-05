@@ -442,13 +442,17 @@ make install
 
 Run that as a normal user. `sudo make install` is intentionally blocked; the workflow escalates only for the host writes that actually need `sudo`.
 
-Install the repository-managed pre-push secret guard into this checkout with:
+Install the repository-managed pre-commit and pre-push secret-clearing hooks into this checkout with:
 
 ```sh
 make install-git-hooks
 ```
 
-Git does not version files below `.git/hooks`, so `.githooks/pre-push` is the tracked source and `scripts/install-git-hooks.sh` copies it to the hooks directory resolved by Git. The installer refuses symlinks and unrelated existing `pre-push` hooks. Before every push, the hook runs `./secrets.sh --clear`, sanitizing active files and any matching example or backup copies that are present without requiring those optional paths to exist. It then rejects non-empty managed fields in the index and scans every outgoing commit snapshot so a later cleanup commit cannot conceal an earlier secret-bearing commit. Diagnostics report only path and key names, never values. After a rejection, stage the sanitized active files and remove or rewrite any secret-bearing outgoing commits before retrying.
+Git does not version files below `.git/hooks`, so `.githooks/pre-commit` and `.githooks/pre-push` are the tracked sources and `scripts/install-git-hooks.sh` copies both into the hooks directory resolved by Git. The installer validates both targets before writing either one, refuses symlinks, and refuses to overwrite unrelated hooks.
+
+Before every commit and push, the matching hook runs `./secrets.sh --clear-initrd --index`. It recursively inspects regular `.env`, `.env.*`, `.conf`, and `.conf.*` files below `initrd/`, clears non-empty assignments whose keys identify credentials (including passwords, passphrases, tokens, usernames, chat IDs, credentials, authentication values, and generic credential keys while exempting recognized public/GPG key metadata), and leaves unrelated assignments unchanged. Output lists only the affected worktree or index path and key name; secret values are never printed. The pre-commit index rewrite preserves other staged content independently from unrelated unstaged edits.
+
+Both hooks always return success to Git, including when clearing reports an error, so they never stop a commit or push. The pre-push hook clears the worktree and index but intentionally does not rewrite immutable outgoing commits; a secret already committed with hooks bypassed can therefore still be pushed. Audit and rewrite that history before pushing when hooks were bypassed.
 
 `make install` installs the required Debian packages for the existing USB-writer runtime before staging the managed host assets. That includes the ISO inspection and rebuild dependencies such as `xorriso`, `grub-install`, `cryptsetup`, `parted`, `dosfstools`, `e2fsprogs`, and `lsinitramfs`.
 
@@ -496,7 +500,7 @@ internal/app/                 Go TUI, config store, plan builder, and helper int
 configs/                      Install-time defaults
   spec/                       Repo-managed live and d-i module/deb/udeb profiles
 initrd/<family>/<stage>/       Opt-in root overlays for separate Live/Netinst/Netboot initrds
-.githooks/pre-push             Tracked secret-clearing and outgoing-history guard
+.githooks/{pre-commit,pre-push} Tracked non-blocking initrd secret clear hooks
 src/python/debian_usb/        Python ISO/media inspection and GRUB rendering logic
   iso_source.py               ISO file access helpers
   boot_parse.py               GRUB/Syslinux parsing and entry selection
@@ -506,6 +510,6 @@ src/python/debian_usb/        Python ISO/media inspection and GRUB rendering log
 scripts/                      POSIX sh launchers, installer, and USB writer
   build_iso.sh                privileged Debian ISO build helper
   check-secrets.py            Index and outgoing-commit managed-secret scanner
-  install-git-hooks.sh        Safe installer for the tracked pre-push hook
+  install-git-hooks.sh        Safe installer for both tracked Git hooks
 tests/python/                 Python unit tests
 ```

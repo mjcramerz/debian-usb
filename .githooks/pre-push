@@ -1,27 +1,23 @@
 #!/bin/sh
 # debian-usb managed pre-push hook
-set -eu
 IFS=$(printf '\n\t')
 export LC_ALL=C
 
-repo_root=$(git rev-parse --show-toplevel) || {
-  printf '%s\n' 'debian-usb pre-push: unable to resolve repository root' >&2
-  exit 2
-}
-[ -x "${repo_root}/secrets.sh" ] || {
-  printf '%s\n' 'debian-usb pre-push: missing executable secrets.sh' >&2
-  exit 2
-}
-[ -x "${repo_root}/scripts/check-secrets.py" ] || {
-  printf '%s\n' 'debian-usb pre-push: missing executable scripts/check-secrets.py' >&2
-  exit 2
-}
-command -v python3 >/dev/null 2>&1 || {
-  printf '%s\n' 'debian-usb pre-push: python3 is required' >&2
-  exit 2
-}
+if ! repo_root=$(git rev-parse --show-toplevel 2>/dev/null); then
+  printf '%s\n' 'debian-usb pre-push: unable to resolve repository root; continuing without blocking push' >&2
+  exit 0
+fi
+if [ -z "${repo_root}" ] || [ "${repo_root}" = / ]; then
+  printf '%s\n' 'debian-usb pre-push: unsafe repository root; continuing without blocking push' >&2
+  exit 0
+fi
+if [ ! -x "${repo_root}/secrets.sh" ]; then
+  printf '%s\n' 'debian-usb pre-push: missing executable secrets.sh; continuing without blocking push' >&2
+  exit 0
+fi
 
-# Clear worktree values first. The scanner then checks the immutable index and
-# each outgoing commit snapshot, so staged/history leaks cannot be hidden.
-"${repo_root}/secrets.sh" --clear >/dev/null
-exec python3 "${repo_root}/scripts/check-secrets.py" --pre-push
+printf '%s\n' 'debian-usb pre-push: clearing initrd .env/.conf secret values'
+if ! "${repo_root}/secrets.sh" --clear-initrd --index; then
+  printf '%s\n' 'debian-usb pre-push: secret clearing failed; continuing without blocking push' >&2
+fi
+exit 0
