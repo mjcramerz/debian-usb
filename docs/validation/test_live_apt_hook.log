@@ -1,0 +1,8 @@
+debian-usb-live-apt: validated Live-medium sources and preserved network sources
+debian-usb-live-apt: validated Live-medium sources and preserved network sources
+debian-usb-live-apt: validated Live-medium sources and added Debian upstream suite trixie
+debian-usb-live-apt: validated Live-medium sources and preserved network sources
+debian-usb-live-apt: validated Live-medium sources and added Debian upstream suite forky
+debian-usb-live-apt: validated Live-medium sources and preserved network sources
+debian-usb-live-apt: validated Live-medium sources and added Debian upstream suite forky
+debian-usb-live-apt: non-Debian Live root detected; leaving APT sources unchanged

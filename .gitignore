@@ -1,6 +1,6 @@
-build/debian-usb
-configs/debian-usb.conf.bak
-configs/debian-usb.conf.example
-examples/debian-usb.conf
+build/
+configs/debian-usb.conf.*
+examples/
 initrd/debian/netinst/*.asc
 apt-update
+.mypy_cache/

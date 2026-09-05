@@ -565,6 +565,8 @@ def _apply_live_settings(kernel_args: str, config_data: dict[str, str], profile:
     if live_hook_args:
         args = _merge_kernel_args(args, live_hook_args)
     effective_live_toram = config_data["DEFAULT_LIVE_TORAM"] == "1" if live_toram is None else live_toram
+    # An explicit OFF choice must also override inherited/profile extras.
+    args = _remove_kernel_args_matching(args, [r"toram(?:=.*)?"])
     if effective_live_toram:
         args = _merge_kernel_args(args, _live_toram_kernel_arg(config_data, profile))
     mem_gib = int(config_data["DEFAULT_LIVE_MEM_GIB"])

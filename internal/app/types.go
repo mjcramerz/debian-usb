@@ -57,6 +57,8 @@ type Device struct {
 }
 
 type CreateRequest struct {
+	Preparation *SourcePreparation
+
 	Profile                     string
 	SourceRole                  string
 	WriteMode                   string
@@ -87,6 +89,8 @@ type MultiOSRequest struct {
 }
 
 type MultiOSRequestItem struct {
+	Preparation *SourcePreparation
+
 	Profile            string
 	SourceRole         string
 	ISOPath            string
@@ -104,6 +108,8 @@ type MultiOSRequestItem struct {
 }
 
 type ISOInspection struct {
+	Pending bool `json:"pending,omitempty"`
+
 	ISOPath                      string   `json:"iso_path"`
 	VolumeID                     string   `json:"volume_id"`
 	MediaClass                   string   `json:"media_class"`
@@ -119,6 +125,10 @@ type ISOInspection struct {
 }
 
 type CreatePlan struct {
+	TargetDevice *Device `json:"target_device,omitempty"`
+
+	Preparation *SourcePreparation `json:"source_preparation,omitempty"`
+
 	Title                       string   `json:"title"`
 	Profile                     string   `json:"profile"`
 	SourceRole                  string   `json:"source_role"`
@@ -161,6 +171,8 @@ type CreatePlan struct {
 }
 
 type MultiOSPlan struct {
+	TargetDevice *Device `json:"target_device,omitempty"`
+
 	SchemaVersion               int               `json:"schema_version"`
 	Title                       string            `json:"title"`
 	WriteMode                   string            `json:"write_mode"`
@@ -175,6 +187,8 @@ type MultiOSPlan struct {
 }
 
 type MultiOSPlanItem struct {
+	Preparation *SourcePreparation `json:"source_preparation,omitempty"`
+
 	ID                      string   `json:"id"`
 	Profile                 string   `json:"profile"`
 	SourceRole              string   `json:"source_role"`

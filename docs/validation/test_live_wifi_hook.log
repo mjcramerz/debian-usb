@@ -1,0 +1,4 @@
+1000-network-wifi: using static Wi-Fi address 192.0.2.44/24 with derived netmask 255.255.255.0
+1000-network-wifi: configuring Wi-Fi on wlan-test
+1000-network-wifi: Wi-Fi configuration completed on wlan-test
+1000-network-wifi: no LIVE_WIFI_ESSID configured; skipping

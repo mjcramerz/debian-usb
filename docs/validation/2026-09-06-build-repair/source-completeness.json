@@ -1,0 +1,24 @@
+{
+  "original_non_directory_entries": 189,
+  "original_files_preserved_unchanged": 177,
+  "original_files_updated": [
+    "README.md",
+    "docs/REFACTOR.md",
+    "docs/VALIDATION.md",
+    "internal/app/app_test.go",
+    "internal/app/create.go",
+    "internal/app/source_selection.go",
+    "src/python/debian_usb/build_iso.py",
+    "src/python/debian_usb/rebuild_iso.py",
+    "tests/python/test_build_iso.py",
+    "tests/python/test_initramfs_deferral.py",
+    "tests/python/test_rebuild_iso.py"
+  ],
+  "intentionally_omitted_generated_files": [
+    "build/debian-usb"
+  ],
+  "missing_original_source_or_configuration_files": [],
+  "all_original_directories_retained": true,
+  "original_configs_and_initrd_files_byte_identical": true,
+  "original_source_file_permissions_preserved": true
+}

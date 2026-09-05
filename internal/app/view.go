@@ -12,9 +12,10 @@ type infoRow struct {
 }
 
 type menuEntry struct {
-	Key    string
-	Label  string
-	Detail string
+	Selected bool
+	Key      string
+	Label    string
+	Detail   string
 }
 
 const (
@@ -28,7 +29,7 @@ const (
 func printHeader(title string) {
 	contentWidth := maxInt(viewHeaderMinWidth, utf8.RuneCountInString(title)+2)
 	border := "+" + strings.Repeat("=", contentWidth+2) + "+"
-	fmt.Printf("\n%s\n| %-*s |\n%s\n\n", border, contentWidth, title, border)
+	fmt.Printf("\n%s\n| %s |\n%s\n\n", styled(border, "1;34"), styled(fmt.Sprintf("%-*s", contentWidth, title), "1;34"), styled(border, "1;34"))
 }
 
 func printStepHeader(step, total int, title string) {
@@ -36,7 +37,7 @@ func printStepHeader(step, total int, title string) {
 }
 
 func printSection(title string, rows ...infoRow) {
-	fmt.Printf("%s\n", title)
+	fmt.Printf("%s\n", styled(title, "1;36"))
 	fmt.Printf("%s\n", strings.Repeat("-", maxInt(viewSectionMinWidth, utf8.RuneCountInString(title))))
 	for _, row := range rows {
 		printInfoRow(row)
@@ -73,7 +74,7 @@ func printBulletList(title string, items ...string) {
 	if len(filtered) == 0 {
 		return
 	}
-	fmt.Printf("%s\n", title)
+	fmt.Printf("%s\n", styled(title, "1;36"))
 	fmt.Printf("%s\n", strings.Repeat("-", maxInt(viewSectionMinWidth, utf8.RuneCountInString(title))))
 	for _, item := range filtered {
 		printWrappedLines("  - ", item, viewWrapWidth)

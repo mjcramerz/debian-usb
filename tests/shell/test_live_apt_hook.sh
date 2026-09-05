@@ -38,6 +38,29 @@ Suites: ${suite}
 Components: main contrib non-free non-free-firmware
 Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
 EOF_EXPECTED
+  case "${suite}" in
+    bullseye) sed -i 's/ non-free-firmware//' "${expected_file}" ;;
+  esac
+  case "${suite}" in
+    bullseye|bookworm|trixie)
+      components='main contrib non-free non-free-firmware'
+      [ "${suite}" != bullseye ] || components='main contrib non-free'
+      cat >>"${expected_file}" <<EOF_UPDATES
+
+Types: deb
+URIs: https://deb.debian.org/debian
+Suites: ${suite}-updates
+Components: ${components}
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: https://security.debian.org/debian-security
+Suites: ${suite}-security
+Components: ${components}
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+EOF_UPDATES
+      ;;
+  esac
   cmp -- "${expected_file}" "${source_file}" || fail "unexpected official fallback content for ${suite}"
 )
 

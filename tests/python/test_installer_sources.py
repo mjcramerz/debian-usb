@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 from debian_usb import installer_sources
 from debian_usb.boot_inspect import validate_prepared_netinst_initrd
@@ -56,6 +56,44 @@ class InstallerSourceTests(unittest.TestCase):
         postinst.write_text(cls._upstream_iso_scan_postinst_text(), encoding="utf-8")
         postinst.chmod(0o755)
         installer_sources._repack_initrd_archive(tree_root, archive_path)
+
+    @unittest.skipUnless(all(shutil.which(command) for command in ("cpio", "find", "gzip")), "requires cpio/find/gzip")
+    def test_overlay_preseed_and_exact_iso_policy_share_one_archive_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            original = root / "original.gz"
+            self._write_test_iso_scan_initrd(original, root / "original-tree")
+            original_bytes = original.read_bytes()
+            bundled = root / "bundled.gz"
+            shutil.copy2(original, bundled)
+            overlay = root / "overlay"
+            overlay.mkdir()
+            (overlay / "marker").write_text("overlay fixture", encoding="utf-8")
+            preseed = root / "preseed.cfg"
+            preseed.write_text("d-i debian-installer/locale string en_US.UTF-8\n", encoding="utf-8")
+            with patch.object(installer_sources, "DEFAULT_WORK_DIR", root / "work"), patch.object(
+                installer_sources, "DEFAULT_STATE_DIR", root / "state"
+            ), patch.object(installer_sources, "DEFAULT_LOG_DIR", root / "logs"), patch.object(
+                installer_sources, "_extract_initrd_archive", wraps=installer_sources._extract_initrd_archive
+            ) as extract, patch.object(
+                installer_sources, "_repack_initrd_archive", wraps=installer_sources._repack_initrd_archive
+            ) as repack:
+                with installer_sources._InstallerInitrdSession(bundled) as session:
+                    installer_sources._embed_initrd_overlay_into_initrd(
+                        initrd_path=bundled, overlay_dir=overlay, bundle_root=root / "bundle", session=session)
+                    installer_sources._embed_repo_preseed_into_initrd(
+                        initrd_path=bundled, preseed_path=preseed, bundle_root=root / "bundle", session=session)
+                    installer_sources._enforce_exact_iso_scan_filename(
+                        initrd_path=bundled, bundle_root=root / "bundle", session=session)
+                self.assertEqual(extract.call_count, 1)
+                self.assertEqual(repack.call_count, 1)
+            self.assertEqual(original.read_bytes(), original_bytes)
+            expanded = root / "expanded"
+            installer_sources._extract_initrd_archive(bundled, expanded)
+            self.assertEqual((expanded / "marker").read_text(encoding="utf-8"), "overlay fixture")
+            self.assertEqual((expanded / "preseed.cfg").read_bytes(), preseed.read_bytes())
+            self.assertIn(installer_sources.ISO_SCAN_EXACT_SELECTION_MARKER,
+                          (expanded / "var/lib/dpkg/info/iso-scan.postinst").read_text(encoding="utf-8"))
 
     def test_detect_kernel_version_from_kernel_file_prefers_filename(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -372,6 +410,7 @@ class InstallerSourceTests(unittest.TestCase):
                 initrd_path=bundled_initrd,
                 overlay_dir=overlay.resolve(),
                 bundle_root=root / "bundle",
+                session=ANY,
             )
             self.assertEqual(bundle["initrd_overlay"], overlay_manifest)
             source_manifest = json.loads(Path(bundle["manifest_path"]).read_text(encoding="utf-8"))

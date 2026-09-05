@@ -7,6 +7,7 @@ import json
 from contextlib import contextmanager
 import os
 from pathlib import Path
+import posixpath
 import re
 import shutil
 import stat
@@ -51,7 +52,10 @@ from .live_hooks import (
     DEBIAN_LIVE_INITRAMFS_MODULES,
     DEBIAN_LIVE_LANGUAGE,
     DEBIAN_LIVE_LOCALE,
+    LIVE_SYSTEMD_MASK_UNITS,
     stage_debian_live_config_hooks,
+    stage_debian_live_apt_policy,
+    _prepare_live_root_directory,
     stage_debian_live_locale,
     stage_debian_live_medium_wifi_config,
     stage_debian_live_wifi_config,
@@ -906,16 +910,39 @@ def remaster_live_tools_source(
     output_dir: str = "",
     selected_groups: list[str] | None = None,
     live_kernel_args: str = "",
+    *,
+    overlay_dir: str = "",
+    ensure_encrypted_persistence: bool = False,
 ) -> dict[str, Any]:
-    selected_packages, live_tool_profile = live_tool_packages_for_profile(
-        profile,
-        selected_groups=selected_groups,
-    )
+    """Materialize all selected live customizations in one rootfs/ISO pass.
+
+    The caller collects choices first. This function performs no USB writes.
+    The source ISO is immutable; output is published atomically after success.
+    """
+    if overlay_dir:
+        overlay_dir = _validate_absolute_path(
+            overlay_dir, allow_missing=False, expect_directory=True, label="overlay_dir"
+        )
+    if ensure_encrypted_persistence and profile not in {PROFILE_DEBIAN, PROFILE_KALI_LINUX, PROFILE_TAILS}:
+        raise ValueError(f"Encrypted persistence is not supported for profile {profile}")
+    if profile in {PROFILE_TAILS, PROFILE_UBUNTU_SERVER} and selected_groups == []:
+        selected_packages = []
+        live_tool_profile = {"path": "", "sha256": "", "name": "live-customization", "selected_groups": []}
+    else:
+        selected_packages, live_tool_profile = live_tool_packages_for_profile(
+            profile, selected_groups=selected_groups,
+        )
     packages = list(selected_packages)
     if profile == PROFILE_DEBIAN:
         packages = _dedupe([*DEBIAN_LIVE_HOOK_PACKAGES, *packages])
-    if not packages:
+    if ensure_encrypted_persistence:
+        packages = _dedupe([*packages, *LIVE_PERSISTENCE_SUPPORT_PACKAGES, "initramfs-tools"])
+    if overlay_dir:
+        packages = _dedupe([*packages, "initramfs-tools"])
+    if not packages and not overlay_dir:
         raise ValueError("Live administration tool remaster requires at least one selected package group")
+    # All package triggers were deferred; each modified Live ISO needs a final initrd.
+    packages = _dedupe([*packages, "initramfs-tools"])
     normalized_live_kernel_args = _validate_live_kernel_args(live_kernel_args)
     if profile != PROFILE_DEBIAN and normalized_live_kernel_args:
         raise ValueError("Live hook kernel arguments are supported only for Debian Live remasters")
@@ -1014,6 +1041,9 @@ def remaster_live_tools_source(
                 workspace_dir=workspace_dir,
                 log_file=log_file,
                 processors=processors,
+                overlay_dir=overlay_dir,
+                ensure_encrypted_persistence=ensure_encrypted_persistence,
+                live_entries=entries,
             )
             if normalized_live_kernel_args:
                 modified_paths = _dedupe(
@@ -1080,6 +1110,9 @@ def remaster_live_tools_source(
         "packages": packages,
         "required_live_packages": list(DEBIAN_LIVE_HOOK_PACKAGES) if profile == PROFILE_DEBIAN else [],
         "selected_groups": list(live_tool_profile["selected_groups"]),
+        "initrd_overlay_dir": overlay_dir,
+        "ensure_encrypted_persistence": ensure_encrypted_persistence,
+        "preparation_passes": 1,
         "live_kernel_arg_keys": [token.split("=", 1)[0] for token in normalized_live_kernel_args.split()],
         "package_profile": {
             "path": live_tool_profile["path"],
@@ -1185,6 +1218,7 @@ def _stage_debian_live_iso_policy(iso_root: Path) -> list[str]:
 def _stage_debian_live_root_policy(live_root: Path) -> None:
     stage_live_kernel_module_policy(live_root, DEBIAN_LIVE_INITRAMFS_MODULES)
     stage_debian_live_wifi_config(live_root)
+    stage_debian_live_apt_policy(live_root)
 
 
 def rebuild_debian_installer_iso(plan_path: str) -> dict[str, Any]:
@@ -1412,7 +1446,6 @@ def _apply_live_host_rebuild_action(
         cwd=workspace_dir,
         log_file=log_file,
     )
-    stage_live_systemd_masks(live_root)
     _stage_debian_live_root_policy(live_root)
     warnings: list[str] = []
     modified_paths = [live_rootfs_path]
@@ -1502,7 +1535,6 @@ def _apply_live_persistence_remaster(
         cwd=workspace_dir,
         log_file=log_file,
     )
-    stage_live_systemd_masks(live_root)
     if profile == PROFILE_DEBIAN:
         _stage_debian_live_root_policy(live_root)
     _install_packages_in_chroot(live_root, packages, log_file, apt_source_root=iso_root)
@@ -1553,6 +1585,9 @@ def _apply_live_tools_remaster(
     workspace_dir: Path,
     log_file: Any,
     processors: int | None = None,
+    overlay_dir: str = "",
+    ensure_encrypted_persistence: bool = False,
+    live_entries: list[Any] | None = None,
 ) -> list[str]:
     processor_count = processors or _squashfs_processor_count()
     extracted_rootfs = iso_root / live_rootfs_path.lstrip("/")
@@ -1562,30 +1597,54 @@ def _apply_live_tools_remaster(
         cwd=workspace_dir,
         log_file=log_file,
     )
-    stage_live_systemd_masks(live_root)
     if profile == PROFILE_DEBIAN:
         stage_debian_live_locale(live_root)
         _stage_debian_live_root_policy(live_root)
-    _install_packages_in_chroot(live_root, packages, log_file, apt_source_root=iso_root)
+    # Package maintainer scripts and triggers must not repeatedly generate an
+    # initrd before the complete module/crypto/overlay policy is in place.
+    with _deferred_initramfs_updates(live_root, log_file):
+        _install_packages_in_chroot(live_root, packages, log_file, apt_source_root=iso_root)
     stage_live_systemd_masks(live_root)
+    if ensure_encrypted_persistence:
+        _stage_encrypted_persistence_policy(live_root)
+    if overlay_dir:
+        _stage_live_initrd_overlay(live_root, Path(overlay_dir))
 
     modified_initrd_paths: list[str] = []
     if profile == PROFILE_DEBIAN:
         stage_debian_live_locale(live_root)
         _configure_debian_live_locale(live_root, log_file)
+    if packages or overlay_dir or ensure_encrypted_persistence:
+        # Resolve each kernel/initrd pairing, never copy the first ABI's initrd
+        # over a different kernel. Aliased entries share one generated image.
+        members = _coerce_member_path_list(live_initrd_paths, fallback=[live_initrd_path])
+        kernel_for_initrd: dict[str, str] = {}
+        for entry in live_entries or []:
+            if not entry.kind.startswith("live") or not entry.initrd_path:
+                continue
+            previous = kernel_for_initrd.get(entry.initrd_path)
+            if previous and previous != entry.kernel_path:
+                raise RuntimeError(f"Conflicting kernels for live initrd {entry.initrd_path}")
+            kernel_for_initrd[entry.initrd_path] = entry.kernel_path
+        for member in members:
+            kernel_for_initrd.setdefault(member, live_kernel_path)
+        generated: dict[str, Path] = {}
+        versions = {
+            member: _detect_live_root_kernel_version(live_root, kernel)
+            for member, kernel in kernel_for_initrd.items()
+        }
         with _mounted_chroot(live_root, log_file):
-            _run_in_chroot(
-                live_root,
-                _chroot_noninteractive_command("update-initramfs", "-u", "-k", "all"),
-                log_file,
-            )
-        kernel_version = _detect_live_root_kernel_version(live_root, live_kernel_path)
-        rebuilt_initrd = _resolve_live_root_initrd_file(live_root, kernel_version)
-        modified_initrd_paths = _copy_file_to_member_paths(
-            rebuilt_initrd,
-            iso_root,
-            _coerce_member_path_list(live_initrd_paths, fallback=[live_initrd_path]),
-        )
+            for version in dict.fromkeys(versions.values()):
+                target = f"/boot/initrd.img-{version}"
+                _run_in_chroot(live_root, _chroot_noninteractive_command("depmod", "-a", version), log_file)
+                # mkinitramfs does not depend on an existing /boot initrd or on
+                # upstream update-initramfs.conf. One generation per ABI.
+                _run_in_chroot(live_root, _chroot_noninteractive_command(
+                    "mkinitramfs", "-o", target, version
+                ), log_file)
+                generated[version] = _resolve_live_root_initrd_file(live_root, version)
+        for member, version in versions.items():
+            modified_initrd_paths.extend(_copy_file_to_member_paths(generated[version], iso_root, [member]))
 
     hook_paths: list[str] = []
     if profile == PROFILE_DEBIAN:
@@ -1770,18 +1829,10 @@ def _detect_live_root_kernel_version(live_root: Path, live_kernel_path: str) -> 
             return version
     if len(module_versions) == 1:
         return module_versions[0]
-    boot_dir = live_root / "boot"
-    for candidate in sorted(boot_dir.glob("vmlinuz-*")) if boot_dir.is_dir() else []:
-        suffix = candidate.name.removeprefix("vmlinuz-").strip()
-        if suffix:
-            return suffix
-    for candidate in sorted(boot_dir.glob("initrd.img-*")) if boot_dir.is_dir() else []:
-        suffix = candidate.name.removeprefix("initrd.img-").strip()
-        if suffix:
-            return suffix
-    if module_versions:
-        return module_versions[-1]
-    raise RuntimeError("could not infer the live kernel version after remastering the root filesystem")
+    raise RuntimeError(
+        f"Cannot unambiguously match live kernel {live_kernel_path} to installed module ABI(s): "
+        + ", ".join(module_versions)
+    )
 
 
 def _resolve_live_root_initrd_file(live_root: Path, kernel_version: str) -> Path:
@@ -1927,16 +1978,20 @@ def _install_packages_in_chroot(
     extra_binds: list[tuple[Path, Path]] = []
     if apt_source_root is not None:
         extra_binds.append((apt_source_root, live_root / CHROOT_ISO_SOURCE_MOUNT.lstrip("/")))
+    # policy-rc.d blocks service starts while maintainer scripts configure
+    # units. Static masks must not obstruct deb-systemd-helper preset; restore
+    # the runtime policy before removing the service-start guard, even on error.
     with _temporary_chroot_service_policy(live_root):
-        with _temporary_chroot_apt_config(live_root, apt_source_root) as apt_config:
-            with _mounted_chroot(live_root, log_file, extra_binds=extra_binds):
-                _run_in_chroot(live_root, _apt_get_chroot_command(apt_config, "update"), log_file)
-                _run_in_chroot(
-                    live_root,
-                    _apt_get_chroot_command(apt_config, "install", "-y", "--no-install-recommends", *packages),
-                    log_file,
-                )
-                _run_in_chroot(live_root, _apt_get_chroot_command(apt_config, "clean"), log_file)
+        with _temporary_chroot_systemd_unmask(live_root):
+            with _temporary_chroot_apt_config(live_root, apt_source_root) as apt_config:
+                with _mounted_chroot(live_root, log_file, extra_binds=extra_binds):
+                    _run_in_chroot(live_root, _apt_get_chroot_command(apt_config, "update"), log_file)
+                    _run_in_chroot(
+                        live_root,
+                        _apt_get_chroot_command(apt_config, "install", "-y", "--no-install-recommends", *packages),
+                        log_file,
+                    )
+                    _run_in_chroot(live_root, _apt_get_chroot_command(apt_config, "clean"), log_file)
 
 
 def _configure_debian_live_locale(live_root: Path, log_file: Any) -> None:
@@ -1958,6 +2013,28 @@ def _configure_debian_live_locale(live_root: Path, log_file: Any) -> None:
 
 def _run_in_chroot(live_root: Path, command: list[str], log_file: Any) -> None:
     _run_logged(["chroot", str(live_root), *command], cwd=live_root, log_file=log_file)
+
+
+@contextmanager
+def _temporary_chroot_systemd_unmask(live_root: Path) -> Iterator[None]:
+    """Allow presets for managed fwupd units only during guarded package work.
+
+    This does not run systemctl on the host, remove unrelated masks, or start
+    services. The caller must keep policy-rc.d active for this entire context.
+    Both /dev/null links and empty unit files are systemd masks.
+    """
+    systemd_dir = _prepare_live_root_directory(live_root, "etc/systemd/system")
+    try:
+        for unit in LIVE_SYSTEMD_MASK_UNITS:
+            path = systemd_dir / unit
+            if path.is_symlink():
+                if path.readlink() == Path("/dev/null"):
+                    path.unlink()
+            elif path.is_file() and path.stat().st_size == 0:
+                path.unlink()
+        yield
+    finally:
+        stage_live_systemd_masks(live_root)
 
 
 @contextmanager
@@ -2716,3 +2793,167 @@ def _dedupe(values: list[str]) -> list[str]:
 def _log(handle: Any, line: str) -> None:
     handle.write(line.rstrip() + "\n")
     handle.flush()
+
+
+def _initramfs_command_directory(live_root: Path, source: str) -> Path:
+    relative = str(Path(source).parent).lstrip("/")
+    # Resolve only the standard merged-/usr aliases, inside the extracted root.
+    # Never let an absolute chroot symlink be followed against the host root.
+    if relative in ("bin", "sbin") and (live_root / relative).is_symlink():
+        target = "usr/" + relative
+        if str((live_root / relative).readlink()) not in (target, "/" + target):
+            raise RuntimeError(f"unsupported /{relative} symlink in source root")
+        relative = target
+    return _prepare_live_root_directory(live_root, relative)
+
+
+def _initramfs_deferral_command(live_root: Path) -> str:
+    """Find the command to defer without dismantling live-tools' diversion.
+
+    A normal root calls update-initramfs directly. A Debian Live root instead
+    has a package-owned symlink to live-update-initramfs, with the real engine
+    diverted to update-initramfs.orig.initramfs-tools. Defer the live wrapper's
+    executable, NOT that symlink or its engine: the vendor diversion must remain
+    installed so dpkg can upgrade either package without ownership conflicts.
+    """
+    database_dir = _prepare_live_root_directory(live_root, "var/lib/dpkg")
+    database = database_dir / "diversions"
+    if database.is_symlink():
+        raise RuntimeError("refusing symlinked dpkg diversions database")
+    if database.exists() and not database.is_file():
+        raise RuntimeError("dpkg diversions database is not a regular file")
+    lines = database.read_text(encoding="utf-8").splitlines() if database.is_file() else []
+    if len(lines) % 3:
+        raise RuntimeError("invalid dpkg diversions database in source root")
+    records = [tuple(lines[i:i + 3]) for i in range(0, len(lines), 3)]
+    candidates = [record for record in records
+                  if record[0] in ("/usr/sbin/update-initramfs", "/sbin/update-initramfs")]
+    if len(candidates) > 1:
+        raise RuntimeError("conflicting update-initramfs diversions in source root")
+    if not candidates:
+        source = "/usr/sbin/update-initramfs"
+        legacy = live_root / "sbin/update-initramfs"
+        if not (live_root / "usr/sbin/update-initramfs").exists() and legacy.exists():
+            source = "/sbin/update-initramfs"
+        directory = _initramfs_command_directory(live_root, source)
+        binary = directory / "update-initramfs"
+        if binary.is_symlink() or (binary.exists() and not binary.is_file()):
+            raise RuntimeError("unsupported update-initramfs command in source root")
+        return source
+
+    source, destination, package = candidates[0]
+    if package != "live-tools" or destination != source + ".orig.initramfs-tools":
+        raise RuntimeError("unsupported update-initramfs diversion in source root: " + package)
+    directory = _initramfs_command_directory(live_root, source)
+    binary = directory / "update-initramfs"
+    backup = directory / "update-initramfs.debian-usb-wrapper"
+    if backup.exists() or backup.is_symlink():
+        raise RuntimeError("unfinished live-tools wrapper backup in source root; use a fresh extraction")
+    if not binary.is_symlink():
+        raise RuntimeError("unsupported live-tools update-initramfs wrapper: expected a symlink")
+    source_parent = "/" + directory.relative_to(live_root.resolve()).as_posix()
+    target = posixpath.normpath(posixpath.join(source_parent, str(binary.readlink())))
+    if target not in ("/bin/live-update-initramfs", "/usr/bin/live-update-initramfs"):
+        raise RuntimeError("unsupported live-tools update-initramfs wrapper target: " + target)
+    # Refuse a pre-existing diversion under either spelling of the live wrapper.
+    if any(record[0] in ("/bin/live-update-initramfs", "/usr/bin/live-update-initramfs")
+           for record in records):
+        raise RuntimeError("unsupported live-update-initramfs diversion in source root")
+    wrapper_dir = _initramfs_command_directory(live_root, target)
+    wrapper = wrapper_dir / "live-update-initramfs"
+    if wrapper.is_symlink() or not wrapper.is_file():
+        raise RuntimeError("live-update-initramfs executable must be a regular file in the source root")
+    # Use the on-disk spelling for a merged-/usr wrapper; preserve the vendor
+    # update-initramfs diversion and its source spelling byte for byte.
+    return "/" + wrapper.relative_to(live_root.resolve()).as_posix()
+
+
+@contextmanager
+def _deferred_initramfs_updates(live_root: Path, log_file: Any) -> Iterator[None]:
+    """Defer -c/-u while keeping package-owned diversions and upgrades valid.
+
+    The temporary local diversion protects a no-op shim from package unpacking.
+    For Live images this is the executable behind the live-tools symlink; its
+    original diversion and underlying initramfs-tools engine are never removed.
+    The latest package-installed executable is restored before final generation.
+    """
+    source = _initramfs_deferral_command(live_root)
+    directory = _initramfs_command_directory(live_root, source)
+    binary = directory / Path(source).name
+    destination = source + ".debian-usb-real"
+    diverted = directory / Path(destination).name
+    if diverted.exists() or diverted.is_symlink():
+        raise RuntimeError("unfinished initramfs command diversion in source root: " + destination)
+    shim = "#!/bin/sh\n# Deferred by debian-usb; generated once after customization.\nexit 0\n"
+    # dpkg diversion keys are path spellings, not resolved inodes. On merged
+    # /usr, protect the legacy spelling too: a package upgrade may unpack via
+    # /bin or /sbin even when the symlink currently names /usr/bin or /usr/sbin.
+    # The alias points to the SAME file, so register it without a second rename.
+    alias = ""
+    parent = str(Path(source).parent)
+    if parent in ("/usr/bin", "/usr/sbin"):
+        legacy_dir = live_root / Path(parent).name
+        if legacy_dir.is_symlink():
+            legacy_source = "/" + Path(parent).name + "/" + Path(source).name
+            if _initramfs_command_directory(live_root, legacy_source) == directory:
+                alias = legacy_source
+    active: list[tuple[str, str]] = []
+    restore_required = binary.is_file()
+    created = False
+    try:
+        _run_in_chroot(live_root, ["dpkg-divert", "--local", "--add", "--rename", "--divert",
+            destination, source], log_file)
+        active.append((source, "--rename"))
+        if alias:
+            _run_in_chroot(live_root, ["dpkg-divert", "--local", "--add", "--no-rename", "--divert",
+                alias + ".debian-usb-real", alias], log_file)
+            active.append((alias, "--no-rename"))
+        # Exclusive creation cannot accidentally follow a package/host symlink.
+        with binary.open("x", encoding="utf-8") as handle:
+            created = True
+            handle.write(shim)
+        binary.chmod(0o755)
+        yield
+    finally:
+        if created:
+            if binary.is_symlink() or (binary.exists() and not binary.is_file()):
+                raise RuntimeError("temporary initramfs shim became a non-regular file: " + source)
+            binary.unlink(missing_ok=True)
+        for command_path, rename_option in reversed(active):
+            _run_in_chroot(live_root, ["dpkg-divert", "--local", "--remove", rename_option, "--divert",
+                command_path + ".debian-usb-real", command_path], log_file)
+        if restore_required and (binary.is_symlink() or not binary.is_file()):
+            raise RuntimeError("package installation did not preserve the initramfs command: " + source)
+
+
+def _stage_encrypted_persistence_policy(live_root: Path) -> None:
+    directory = _prepare_live_root_directory(live_root, "etc/cryptsetup-initramfs")
+    target = directory / "conf-hook"
+    if target.is_symlink():
+        raise ValueError("refusing symlinked cryptsetup initramfs policy")
+    content = target.read_text(encoding="utf-8") if target.is_file() else ""
+    target.write_text(content.rstrip() + "\n# Include cryptsetup even without host crypttab entries.\nCRYPTSETUP=y\n", encoding="utf-8")
+    directory = _prepare_live_root_directory(live_root, "etc/initramfs-tools")
+    target = directory / "modules"
+    if target.is_symlink():
+        raise ValueError("refusing symlinked initramfs modules policy")
+    content = target.read_text(encoding="utf-8") if target.is_file() else ""
+    existing = {line.split()[0] for line in content.splitlines() if line.strip() and not line.lstrip().startswith("#")}
+    additions = [name for name in ("dm_mod", "dm_crypt") if name not in existing]
+    target.write_text(content.rstrip() + "\n" + "\n".join(additions) + "\n", encoding="utf-8")
+
+
+def _stage_live_initrd_overlay(live_root: Path, overlay_dir: Path) -> None:
+    destination = _prepare_live_root_directory(live_root, "usr/share/debian-usb/initrd-overlay")
+    merge_initrd_overlay(overlay_dir, destination)
+    hooks = _prepare_live_root_directory(live_root, "etc/initramfs-tools/hooks")
+    target = hooks / "zz-debian-usb-overlay"
+    if target.is_symlink():
+        raise ValueError("refusing symlinked initramfs overlay hook")
+    target.write_text(
+        '#!/bin/sh\nset -eu\ncase "${1:-}" in prereqs) exit 0;; esac\n'
+        ': "${DESTDIR:?initramfs destination is required}"\n'
+        'cp -a /usr/share/debian-usb/initrd-overlay/. "${DESTDIR}/"\n',
+        encoding="utf-8",
+    )
+    target.chmod(0o755)

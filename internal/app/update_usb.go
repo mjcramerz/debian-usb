@@ -39,7 +39,9 @@ func (a *App) updatePlannedExecutionUSB(execution PlannedExecution) (menuAction,
 		infoRow{Label: "Target device", Value: targetPath},
 		infoRow{Label: "Actions", Value: "Refresh managed GRUB, staged preseed trees, Secure Boot assets, and repo-managed boot files without repartitioning"},
 	)
-	printSection("Technical Specs", plannedExecutionTechnicalSpecRows(execution, Device{Path: targetPath})...)
+	if err := a.reviewSavedPlan(&execution, targetPath, true); err != nil {
+		return menuStay, err
+	}
 	confirmed, err := a.promptYesNo("Proceed with USB update", false)
 	if err != nil {
 		return menuStay, err

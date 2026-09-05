@@ -149,6 +149,15 @@ func TestBuildCreatePlanCarriesOfflinePreseedSourceDirForManagedNetinstMedia(t *
 	if err := os.MkdirAll(isoPath, 0755); err != nil {
 		t.Fatalf("mkdir prepared source: %v", err)
 	}
+	for _, name := range []string{"hd-media/vmlinuz", "hd-media/initrd.gz", "payload/netinst.iso"} {
+		target := filepath.Join(isoPath, name)
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, []byte("fixture"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	offlinePreseedDir := filepath.Join(tempDir, "preseed")
 	if err := os.MkdirAll(offlinePreseedDir, 0755); err != nil {
 		t.Fatalf("mkdir offline preseed dir: %v", err)

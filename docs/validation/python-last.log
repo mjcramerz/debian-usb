@@ -1,0 +1,20 @@
+test_clear_copies_leaves_active_files_unchanged (test_secrets.SecretsScriptTests.test_clear_copies_leaves_active_files_unchanged) ... ok
+test_clear_dry_run_leaves_all_files_unchanged (test_secrets.SecretsScriptTests.test_clear_dry_run_leaves_all_files_unchanged) ... ok
+test_clear_empties_active_fields_removes_legacy_grub_tokens_and_preserves_modes (test_secrets.SecretsScriptTests.test_clear_empties_active_fields_removes_legacy_grub_tokens_and_preserves_modes) ... ok
+test_clear_initrd_clears_arbitrary_env_and_conf_secret_assignments (test_secrets.SecretsScriptTests.test_clear_initrd_clears_arbitrary_env_and_conf_secret_assignments) ... ok
+test_hidden_tty_input_suppresses_only_getpass_encoding_warning (test_secrets.SecretsScriptTests.test_hidden_tty_input_suppresses_only_getpass_encoding_warning) ... ok
+test_missing_active_envs_and_optional_copies_do_not_fail (test_secrets.SecretsScriptTests.test_missing_active_envs_and_optional_copies_do_not_fail) ... ok
+test_missing_assignment_is_upserted_without_fixed_entry_validation (test_secrets.SecretsScriptTests.test_missing_assignment_is_upserted_without_fixed_entry_validation) ... ok
+test_optional_backup_symlink_is_ignored_without_following_or_failure (test_secrets.SecretsScriptTests.test_optional_backup_symlink_is_ignored_without_following_or_failure) ... ok
+test_set_keeps_netinst_and_live_wifi_passphrases_separate (test_secrets.SecretsScriptTests.test_set_keeps_netinst_and_live_wifi_passphrases_separate) ... ok
+test_set_rejects_quotes_without_changing_active_files (test_secrets.SecretsScriptTests.test_set_rejects_quotes_without_changing_active_files) ... ok
+test_set_rejects_whitespace_without_changing_active_or_optional_files (test_secrets.SecretsScriptTests.test_set_rejects_whitespace_without_changing_active_or_optional_files) ... ok
+test_repo_python_wrapper_does_not_create_repo_local_pycache_dirs (test_sitecustomize.SiteCustomizeTests.test_repo_python_wrapper_does_not_create_repo_local_pycache_dirs) ... ok
+test_temporary_work_dir_creates_subdirectory_under_work_root (test_workdir.WorkDirTests.test_temporary_work_dir_creates_subdirectory_under_work_root) ... ok
+test_work_root_falls_back_when_default_path_is_not_writable (test_workdir.WorkDirTests.test_work_root_falls_back_when_default_path_is_not_writable) ... ok
+test_work_root_uses_environment_override (test_workdir.WorkDirTests.test_work_root_uses_environment_override) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 21.142s
+
+OK

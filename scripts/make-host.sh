@@ -259,6 +259,7 @@ dusb_install() (
   dusb_install_tree "${repo_root}/configs/spec" "${specdir}"
   dusb_install_tree "${repo_root}/configs/preseed" "${preseeddir}"
   dusb_install_tree "${repo_root}/initrd" "${initrddir}"
+  chmod 0600 "${initrddir}/debian/live/live.env" || dusb_die "failed to protect Live environment file"
   install -m 0644 -- "${repo_root}/configs/persistence-debian.conf" "${persistencedir}/debian.conf"
   install -m 0644 -- "${repo_root}/configs/persistence-kali.conf" "${persistencedir}/kali.conf"
   dusb_install_tree "${repo_root}/src/python/debian_usb" "${pythondir}/debian_usb"
@@ -269,9 +270,13 @@ dusb_install() (
     "${pythondir}/debian_usb/live_hooks.py" || dusb_die "failed to set Live administration tool runtime file modes"
   chmod 0755 \
     "${hooksdir}/0500-apt-live-medium.sh" \
+    "${hooksdir}/live-apt-repository.py" \
     "${hooksdir}/1000-network-wifi.sh" || dusb_die "failed to set live config hook modes"
   install -m 0644 -- "${repo_root}/configs/debian-usb.conf" "${etcdir}/debian-usb.conf"
   install -m 0644 -- "${repo_root}/README.md" "${docdir}/README.md"
+  if [ -d "${repo_root}/docs" ]; then
+    dusb_install_tree "${repo_root}/docs" "${docdir}/docs"
+  fi
   dusb_note "Install complete"
   dusb_note_kv "Binary" "${bindir}/${BIN_NAME}"
   dusb_note_kv "Config" "${etcdir}/debian-usb.conf"

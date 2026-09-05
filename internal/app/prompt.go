@@ -20,6 +20,11 @@ const (
 var ErrUserInterrupt = errors.New("user interrupt")
 
 func (a *App) promptChoice(label string) (string, error) {
+	entries := a.menuEntries
+	a.menuEntries = nil
+	if len(entries) > 0 && a.stdin != nil && isTerminal(a.stdin) && isTerminal(os.Stdout) && os.Getenv("TERM") != "dumb" {
+		return a.interactiveMenuChoice(label, entries)
+	}
 	line, err := a.readPromptLine(fmt.Sprintf("%s: ", label))
 	if err != nil {
 		return "", err

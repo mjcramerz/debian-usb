@@ -17,7 +17,7 @@ func (a *App) rebuildInstallerISOMenu() (menuAction, error) {
 			infoRow{Label: "Ubuntu", Value: "Placeholder"},
 			infoRow{Label: "Kali", Value: "Placeholder"},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Debian", Detail: "existing installer ISO"},
 			menuEntry{Key: "2", Label: "Ubuntu", Detail: "placeholder"},
 			menuEntry{Key: "3", Label: "Kali", Detail: "placeholder"},
@@ -78,7 +78,7 @@ func (a *App) handleRebuildInstallerISODebian() (menuAction, error) {
 	for {
 		printHeader("Rebuild Installer ISO - Debian")
 		printSection("Source", rebuildInstallerInspectionRows(inspection)...)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "D-I", Detail: "installer kernel + udebs"},
 			menuEntry{Key: "2", Label: "Live Host", Detail: "live rootfs kernel + debs"},
 			menuEntry{Key: "b", Label: "Back"},
@@ -131,7 +131,7 @@ func (a *App) rebuildInstallerDIDebianMenu(inspection RebuildInstallerISOInspect
 		} else {
 			printSection("Host Kernel Tree", rebuildInstallerHostKernelRows(hostSupport)...)
 		}
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Add Kernel Modules", Detail: "kernel-wedge + rebuilt kernel udebs"},
 			menuEntry{Key: "2", Label: "Add Udeb Packages", Detail: "source-package -> udeb rebuild"},
 			menuEntry{Key: "3", Label: "Update Kernel", Detail: "replace installer kernel ABI"},
@@ -272,7 +272,7 @@ func (a *App) rebuildInstallerLiveHostDebianMenu(inspection RebuildInstallerISOI
 			infoRow{Label: "Kernel", Value: blankIfEmpty(inspection.LiveKernelPath, "<undetected>")},
 			infoRow{Label: "Initrd", Value: blankIfEmpty(inspection.LiveInitrdPath, "<undetected>")},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Replace Kernel", Detail: "install new live kernel + initrd"},
 			menuEntry{Key: "2", Label: "Add Deb Packages", Detail: "install packages into live rootfs"},
 			menuEntry{Key: "b", Label: "Back"},
@@ -314,19 +314,7 @@ func (a *App) executeRebuildInstallerISOPlan(inspection RebuildInstallerISOInspe
 		printBulletList("Source warnings", inspection.Warnings...)
 	}
 
-	ensureDeps, err := a.promptYesNo("Check and install missing Debian rebuild host dependencies now", true)
-	if err != nil {
-		return menuStay, err
-	}
-	if !ensureDeps {
-		fmt.Println("Installer ISO rebuild cancelled before dependency validation.")
-		return menuStay, nil
-	}
-	if err := a.backend.EnsureDebianRebuildDeps(); err != nil {
-		return menuStay, err
-	}
-
-	confirmed, err := a.promptYesNo("Proceed with installer ISO rebuild", false)
+	confirmed, err := a.promptYesNo("Install required host dependencies and rebuild this ISO", false)
 	if err != nil {
 		return menuStay, err
 	}
@@ -335,6 +323,9 @@ func (a *App) executeRebuildInstallerISOPlan(inspection RebuildInstallerISOInspe
 		return menuStay, nil
 	}
 
+	if err := a.backend.EnsureDebianRebuildDeps(); err != nil {
+		return menuStay, err
+	}
 	result, err := a.backend.RebuildDebianInstallerISO(plan)
 	if err != nil {
 		return menuStay, err

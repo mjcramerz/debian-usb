@@ -93,6 +93,8 @@ MAX_LIVE_ROOT_POLICY_SYMLINKS = 40
 # inspection/loading, and CH341A userspace access. They are installed even
 # when the user explicitly selects no optional Live tool groups.
 DEBIAN_LIVE_HOOK_PACKAGES = (
+    "python3",  # Full stdlib: APT repository validation needs bz2/lzma/hashlib.
+    "util-linux",
     "ca-certificates",
     "debian-archive-keyring",
     "initramfs-tools",
@@ -590,3 +592,44 @@ def _validate_hooks_dir(path: Path) -> Path:
         if not hook_path.is_file():
             raise ValueError(f"missing Debian Live config hook: {hook_path}")
     return resolved
+
+
+def stage_debian_live_apt_policy(live_root_dir: Path) -> list[Path]:
+    """Make APT repair independent of medium hooks and persistent /etc changes."""
+    root = _prepare_live_root(live_root_dir)
+    source = live_config_hooks_dir()
+    destinations: list[Path] = []
+    libexec = _prepare_live_root_directory(root, "usr/lib/debian-usb")
+    for original, filename in (("0500-apt-live-medium.sh", "live-apt-repair"),
+                               ("live-apt-repository.py", "live-apt-repository")):
+        target = libexec / filename
+        if target.is_symlink():
+            raise ValueError(f"refusing symlinked live APT helper: {target}")
+        shutil.copyfile(source / original, target)
+        target.chmod(0o755)
+        destinations.append(target)
+    units = _prepare_live_root_directory(root, "etc/systemd/system")
+    unit = units / "debian-usb-live-apt.service"
+    if unit.is_symlink():
+        raise ValueError("refusing symlinked live APT service")
+    unit.write_text(
+        "[Unit]\nDescription=Repair Debian Live APT sources and attach offline ISO repository\n"
+        "After=local-fs.target live-config.service\nBefore=apt-daily.service apt-daily-upgrade.service\n"
+        "ConditionKernelCommandLine=boot=live\n\n[Service]\nType=oneshot\n"
+        "ExecStart=/usr/lib/debian-usb/live-apt-repair\nRemainAfterExit=yes\n"
+        "TimeoutStartSec=90\n\n[Install]\nWantedBy=multi-user.target\n", encoding="utf-8")
+    unit.chmod(0o644)
+    wants = _prepare_live_root_directory(root, "etc/systemd/system/multi-user.target.wants")
+    link = wants / unit.name
+    if link.is_symlink() or link.exists():
+        link.unlink()
+    link.symlink_to("../" + unit.name)
+    apt = _prepare_live_root_directory(root, "etc/apt/apt.conf.d")
+    hook = apt / "05debian-usb-live-medium"
+    if hook.is_symlink():
+        raise ValueError("refusing symlinked APT pre-update configuration")
+    hook.write_text(
+        '// Revalidate on every update, including a persisted /etc or removed USB.\n'
+        'APT::Update::Pre-Invoke { "/usr/lib/debian-usb/live-apt-repair"; };\n', encoding="utf-8")
+    hook.chmod(0o644)
+    return [*destinations, unit, link, hook]

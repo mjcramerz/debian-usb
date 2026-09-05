@@ -1,0 +1,106 @@
+?   	debian-usb/cmd/debian-usb	[no test files]
+ok  	debian-usb/internal/app	(cached)
+.........................................[prepare-managed-installer-source] Starting debian netboot source preparation.
+.[prepare-managed-installer-source] Starting debian netinst source preparation.
+..........................................................................................................[download] DEBIAN_LIVE_ISO_STABLE_URL: resolved current release ISO to https://cdimage.debian.org/debian-cd/current-live/amd64/iso-hybrid/debian-live-13.6.0-amd64-standard.iso
+[download] DEBIAN_LIVE_ISO_STABLE_URL: downloading https://cdimage.debian.org/debian-cd/current-live/amd64/iso-hybrid/debian-live-13.6.0-amd64-standard.iso
+[download] DEBIAN_LIVE_ISO_STABLE_URL: destination /tmp/tmptba898my/iso/debian_live_iso_stable/debian-live-13.6.0-amd64-standard.iso
+[download] DEBIAN_LIVE_ISO_STABLE_URL: saved /tmp/tmptba898my/iso/debian_live_iso_stable/debian-live-13.6.0-amd64-standard.iso (104 bytes)
+[download] DEBIAN_LIVE_ISO_STABLE_URL: using cached file /tmp/tmptba898my/iso/debian_live_iso_stable/debian-live-13.6.0-amd64-standard.iso
+....[download] DEBIAN_LIVE_ISO_STABLE_URL: using cached file /tmp/tmpj4bddcnd/iso/debian_live_iso_stable/debian-live-13.6.0-amd64-standard.iso
+.......[download] DEBIAN_NETINST_INITRD_STABLE_URL: downloading https://example.test/reviewed/initrd.gz
+[download] DEBIAN_NETINST_INITRD_STABLE_URL: destination /tmp/tmpbi0viuii/debian_netinst_initrd_stable/initrd.gz
+[download] DEBIAN_NETINST_INITRD_STABLE_URL: saved /tmp/tmpbi0viuii/debian_netinst_initrd_stable/initrd.gz (8 bytes)
+..........................................[prepare-managed-installer-source] Merging /tmp/tmps0daihet/overlay into the root of initrd.gz.
+.[prepare-managed-installer-source] Enforcing exact iso-scan/filename selection in the copied hd-media initrd.gz.
+....[prepare-managed-installer-source] Merging /tmp/tmprvj9nav8/overlay into the root of bundled.gz.
+[prepare-managed-installer-source] Checklist 1/4 | Preseed: Embedding repo preseed /tmp/tmprvj9nav8/preseed.cfg into bundled.gz.
+[prepare-managed-installer-source] Checklist 2/4 | Preseed: Extracting installer initrd so /preseed.cfg can be updated.
+[prepare-managed-installer-source] Checklist 3/4 | Preseed: Repacking installer initrd.gz with embedded /preseed.cfg.
+[prepare-managed-installer-source] Checklist 4/4 | Complete: Embedded initrd preseed manifest written to /tmp/tmprvj9nav8/bundle/.debian-usb/installer/initrd-preseed-manifest.json.
+[prepare-managed-installer-source] Enforcing exact iso-scan/filename selection in the copied hd-media initrd.gz.
+.....[prepare-managed-installer-source] Starting debian netinst source preparation.
+.[prepare-managed-installer-source] Starting debian netinst source preparation.
+[prepare-managed-installer-source] Selected modules: xxhash_generic, lz4
+[prepare-managed-installer-source] Selected strategy: Use Host Kernel
+[prepare-managed-installer-source] Enforcing exact iso-scan/filename selection in the copied hd-media initrd.gz.
+..[prepare-managed-installer-source] Starting debian netinst source preparation.
+[prepare-managed-installer-source] Selected modules: xxhash_generic, lz4
+[prepare-managed-installer-source] Selected strategy: Use Host Kernel
+..[prepare-managed-installer-source] Starting debian netinst source preparation.
+.[prepare-managed-installer-source] Starting debian netinst source preparation.
+.[prepare-managed-installer-source] Starting debian netinst source preparation.
+.[prepare-managed-installer-source] Starting debian netboot source preparation.
+.[prepare-managed-installer-source] Checklist 1/6 | Tools: Verifying the helper tools needed to inspect the installer initrd.
+[prepare-managed-installer-source] Checklist 2/6 | ABI: Detecting the installer kernel ABI from /tmp/tmpsz4z35b6/initrd.gz.
+[prepare-managed-installer-source] Checklist 3/6 | Kernel Match: Inspecting the kernel image version from /tmp/tmpsz4z35b6/vmlinuz.
+[prepare-managed-installer-source] Checklist 4/6 | Support Check: Inspecting selected module support for installer ABI 7.0.13+deb14-amd64.
+[prepare-managed-installer-source] Checklist 4/6 | Support Check: Resolution: xxhash_generic=builtin (CONFIG_XXHASH)
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Selected support is already built into the matched kernel; no initrd mutation is required.
+[prepare-managed-installer-source] Checklist 6/6 | Complete: Prepared source bundle manifest written to /tmp/tmpsz4z35b6/bundle/.debian-usb/installer/initrd-module-manifest.json.
+.[prepare-managed-installer-source] Checklist 1/6 | Tools: Verifying the helper tools needed to inspect the installer initrd.
+[prepare-managed-installer-source] Checklist 2/6 | ABI: Detecting the installer kernel ABI from /tmp/tmptbk3xb_q/initrd.gz.
+[prepare-managed-installer-source] Checklist 3/6 | Kernel Match: Inspecting the kernel image version from /tmp/tmptbk3xb_q/vmlinuz.
+[prepare-managed-installer-source] Checklist 4/6 | Support Check: Inspecting selected module support for installer ABI 7.0.13+deb14-amd64.
+[prepare-managed-installer-source] Checklist 4/6 | Support Check: Resolution: xxhash_generic=rebuild-needed
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Source rebuild selected; rebuilding matching Debian installer udebs for the selected non-builtin support.
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Extracting installer initrd so rebuilt udebs can be injected.
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Injecting rebuilt installer udeb payloads into initrd.
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Refreshing initrd module dependency metadata with depmod.
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Repacking installer initrd.gz.
+[prepare-managed-installer-source] Checklist 6/6 | Complete: Prepared source bundle manifest written to /tmp/tmptbk3xb_q/bundle/.debian-usb/installer/initrd-module-manifest.json.
+.[prepare-managed-installer-source] Checklist 1/6 | Tools: Verifying the helper tools needed to inspect the installer initrd.
+[prepare-managed-installer-source] Checklist 2/6 | ABI: Detecting the installer kernel ABI from /tmp/tmpxfbc9cgc/initrd.gz.
+[prepare-managed-installer-source] Checklist 3/6 | Kernel Match: Inspecting the kernel image version from /tmp/tmpxfbc9cgc/vmlinuz.
+[prepare-managed-installer-source] Checklist 4/6 | Support Check: Inspecting selected module support for installer ABI 7.0.13+deb14-amd64.
+[prepare-managed-installer-source] Checklist 4/6 | Support Check: Resolution: xxhash_generic=rebuild-needed
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Source rebuild selected; rebuilding matching Debian installer udebs for the selected non-builtin support.
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Extracting installer initrd so rebuilt udebs can be injected.
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Injecting rebuilt installer udeb payloads into initrd.
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Refreshing initrd module dependency metadata with depmod.
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Repacking installer initrd.gz.
+[prepare-managed-installer-source] Checklist 6/6 | Complete: Prepared source bundle manifest written to /tmp/tmpxfbc9cgc/bundle/.debian-usb/installer/initrd-module-manifest.json.
+.[prepare-managed-installer-source] Checklist 1/6 | Tools: Verifying the helper tools needed to inspect the installer initrd.
+[prepare-managed-installer-source] Checklist 2/6 | ABI: Detecting the installer kernel ABI from /tmp/tmp37z_m0cv/initrd.gz.
+[prepare-managed-installer-source] Checklist 3/6 | Kernel Match: Inspecting the kernel image version from /tmp/tmp37z_m0cv/vmlinuz-6.12.94+deb13-amd64.
+[prepare-managed-installer-source] Checklist 4/6 | Support Check: Inspecting selected module support for installer ABI 6.12.94+deb13-amd64.
+[prepare-managed-installer-source] Checklist 4/6 | Support Check: Resolution: xxhash_generic=module (xxhash), lz4=module (lz4_compress)
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Copying required kernel modules and their dependency closure into the installer initrd.
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Extracting installer initrd for module copy.
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Refreshing initrd module dependency metadata with depmod.
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Repacking installer initrd.gz.
+[prepare-managed-installer-source] Checklist 6/6 | Complete: Prepared source bundle manifest written to /tmp/tmp37z_m0cv/bundle/.debian-usb/installer/initrd-module-manifest.json.
+.[prepare-managed-installer-source] Checklist 1/6 | Tools: Verifying the helper tools needed to inspect the installer initrd.
+[prepare-managed-installer-source] Checklist 2/6 | ABI: Detecting the installer kernel ABI from /tmp/tmpwxoje0qg/initrd.gz.
+[prepare-managed-installer-source] Checklist 3/6 | Kernel Match: Inspecting the kernel image version from /tmp/tmpwxoje0qg/vmlinuz.
+[prepare-managed-installer-source] Checklist 4/6 | Support Check: Inspecting selected module support for installer ABI 6.12.86+deb13-amd64.
+[prepare-managed-installer-source] Checklist 4/6 | Support Check: Resolution: xxhash_generic=rebuild-needed, lz4=rebuild-needed
+.[prepare-managed-installer-source] Checklist 1/6 | Tools: Verifying the helper tools needed to inspect the installer initrd.
+[prepare-managed-installer-source] Checklist 2/6 | ABI: Detecting the installer kernel ABI from /tmp/tmp9w1b4c2g/initrd.gz.
+[prepare-managed-installer-source] Checklist 3/6 | Kernel Match: Inspecting the kernel image version from /tmp/tmp9w1b4c2g/vmlinuz-6.12.86+deb13-amd64.
+[prepare-managed-installer-source] Checklist 4/6 | Support Check: Inspecting selected module support for installer ABI 6.12.86+deb13-amd64.
+[prepare-managed-installer-source] Checklist 4/6 | Support Check: Resolution: xxhash_generic=module (xxhash_generic), lz4=module (lz4)
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Copying required kernel modules and their dependency closure into the installer initrd.
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Extracting installer initrd for module copy.
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Refreshing initrd module dependency metadata with depmod.
+[prepare-managed-installer-source] Checklist 5/6 | Apply Modules: Repacking installer initrd.gz.
+[prepare-managed-installer-source] Checklist 6/6 | Complete: Prepared source bundle manifest written to /tmp/tmp9w1b4c2g/bundle/.debian-usb/installer/initrd-module-manifest.json.
+.[prepare-managed-installer-source] Checklist 1/6 | Tools: Verifying the helper tools needed to inspect the installer initrd.
+[prepare-managed-installer-source] Checklist 2/6 | ABI: Detecting the installer kernel ABI from /tmp/tmpvdy_sukh/initrd.gz.
+[prepare-managed-installer-source] Checklist 3/6 | Kernel Match: Inspecting the kernel image version from /tmp/tmpvdy_sukh/vmlinuz.
+.................................................................................................................................
+----------------------------------------------------------------------
+Ran 355 tests in 17.187s
+
+OK
+debian-usb-live-apt: validated Live-medium sources and preserved network sources
+debian-usb-live-apt: validated Live-medium sources and preserved network sources
+debian-usb-live-apt: validated Live-medium sources and added Debian upstream suite trixie
+debian-usb-live-apt: validated Live-medium sources and preserved network sources
+debian-usb-live-apt: validated Live-medium sources and added Debian upstream suite forky
+debian-usb-live-apt: validated Live-medium sources and preserved network sources
+debian-usb-live-apt: validated Live-medium sources and added Debian upstream suite forky
+debian-usb-live-apt: non-Debian Live root detected; leaving APT sources unchanged
+write_usb.sh: Remastering debian Live payload with the repo-managed recovery and administration tool profile
+write_usb.sh: Embedding live config hooks into raw ISO payload under /live/config-hooks
+write_usb.sh: Embedding live config hooks into raw ISO payload under /live/config-hooks

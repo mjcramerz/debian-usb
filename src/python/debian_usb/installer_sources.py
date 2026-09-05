@@ -294,6 +294,33 @@ def _bundle_syslinux_cfg(asset_root: str) -> str:
     )
 
 
+
+class _InstallerInitrdSession:
+    """One extraction/repack across modules, overlay, preseed and exact ISO policy."""
+    def __init__(self, initrd_path: Path) -> None:
+        self.initrd_path = initrd_path
+        self._temporary: Any = None
+        self.root: Path | None = None
+        self.changed = False
+
+    def __enter__(self) -> "_InstallerInitrdSession":
+        return self
+
+    def tree(self) -> Path:
+        if self.root is None:
+            self._temporary = tempfile.TemporaryDirectory(prefix=".initrd-work-", dir=self.initrd_path.parent)
+            self.root = Path(self._temporary.name)
+            _extract_initrd_archive(self.initrd_path, self.root)
+        return self.root
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        try:
+            if exc_type is None and self.changed and self.root is not None:
+                _repack_initrd_archive(self.root, self.initrd_path)
+        finally:
+            if self._temporary is not None:
+                self._temporary.cleanup()
+
 def prepare_managed_installer_source(
     profile: str,
     source_role: str,
@@ -327,6 +354,10 @@ def prepare_managed_installer_source(
     if resolved_preseed_path is not None and not resolved_preseed_path.is_file():
         raise ValueError(f"initrd_preseed_path is not a regular file: {resolved_preseed_path}")
     resolved_overlay_dir = Path(initrd_overlay_dir).expanduser().resolve() if str(initrd_overlay_dir or "").strip() else None
+    if resolved_overlay_dir is not None and not resolved_overlay_dir.is_dir():
+        raise ValueError(f"initrd_overlay_dir is not a directory: {resolved_overlay_dir}")
+    if source_role == "netboot" and iso_path:
+        raise ValueError("netboot sources must not include an ISO payload")
     if preflight_only:
         if iso_path:
             _ensure_installer_assets_align_with_iso(
@@ -352,9 +383,14 @@ def prepare_managed_installer_source(
             ),
         }
     _status(f"Starting {profile} {source_role} source preparation.")
-    bundle_root = Path(output_dir).expanduser().resolve() if output_dir else SOURCE_BUNDLE_ROOT / profile / source_role / _bundle_slug(profile, source_role, iso_path, kernel_path)
+    bundle_root = Path(output_dir).expanduser().resolve() if output_dir else SOURCE_BUNDLE_ROOT / profile / source_role / (
+        _bundle_slug(profile, source_role, iso_path, kernel_path) + "-" + dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    )
     if bundle_root == Path(bundle_root.anchor):
         raise ValueError(f"refusing unsafe managed installer bundle root: {bundle_root}")
+    for selected in (kernel_path, initrd_path, iso_path, initrd_preseed_path, initrd_overlay_dir):
+        if selected and Path(selected).expanduser().resolve().is_relative_to(bundle_root):
+            raise ValueError("installer output must not contain any selected input")
     # This directory is a generated, role-scoped bundle. Remove only paths
     # owned by this helper so a bundle created by an older release cannot leave
     # /install*, /live, .disk, or a second payload ISO behind.
@@ -395,43 +431,48 @@ def prepare_managed_installer_source(
     bundled_kernel = _copy_regular_file(kernel_path, asset_dir / "vmlinuz", "kernel_path")
     bundled_initrd = _copy_regular_file(initrd_path, asset_dir / "initrd.gz", "initrd_path")
     rebuild_manifest: dict[str, Any] | None = None
-    if selected_extra_modules:
-        _status("Selected modules: " + ", ".join(selected_extra_modules))
-        _status("Selected strategy: " + _module_source_strategy_label(normalized_module_source_strategy))
-        rebuild_manifest = _rebuild_debian_netinst_initrd_modules(
-            kernel_path=Path(bundled_kernel),
-            initrd_path=Path(bundled_initrd),
-            selected_options=selected_extra_modules,
-            bundle_root=bundle_root,
-            module_source_strategy=normalized_module_source_strategy,
-        )
-    else:
-        _clear_existing_initrd_rebuild_manifest(bundle_root)
     overlay_manifest: dict[str, Any] | None = None
-    if resolved_overlay_dir is not None:
-        overlay_manifest = _embed_initrd_overlay_into_initrd(
-            initrd_path=Path(bundled_initrd),
-            overlay_dir=resolved_overlay_dir,
-            bundle_root=bundle_root,
-        )
-    else:
-        _clear_existing_initrd_overlay_manifest(bundle_root)
     preseed_manifest: dict[str, Any] | None = None
-    if resolved_preseed_path is not None:
-        preseed_manifest = _embed_repo_preseed_into_initrd(
-            initrd_path=Path(bundled_initrd),
-            preseed_path=resolved_preseed_path,
-            bundle_root=bundle_root,
-        )
-    else:
-        _clear_existing_initrd_preseed_manifest(bundle_root)
     iso_scan_selection_manifest: dict[str, Any] | None = None
-    _clear_existing_iso_scan_selection_manifest(bundle_root)
-    if source_role == "netinst":
-        iso_scan_selection_manifest = _enforce_exact_iso_scan_filename(
-            initrd_path=Path(bundled_initrd),
-            bundle_root=bundle_root,
-        )
+    with _InstallerInitrdSession(Path(bundled_initrd)) as session:
+        if selected_extra_modules:
+            _status("Selected modules: " + ", ".join(selected_extra_modules))
+            _status("Selected strategy: " + _module_source_strategy_label(normalized_module_source_strategy))
+            rebuild_manifest = _rebuild_debian_netinst_initrd_modules(
+                kernel_path=Path(bundled_kernel),
+                initrd_path=Path(bundled_initrd),
+                selected_options=selected_extra_modules,
+                bundle_root=bundle_root,
+                session=session,
+                module_source_strategy=normalized_module_source_strategy,
+            )
+        else:
+            _clear_existing_initrd_rebuild_manifest(bundle_root)
+        if resolved_overlay_dir is not None:
+            overlay_manifest = _embed_initrd_overlay_into_initrd(
+                initrd_path=Path(bundled_initrd),
+                overlay_dir=resolved_overlay_dir,
+                bundle_root=bundle_root,
+                session=session,
+            )
+        else:
+            _clear_existing_initrd_overlay_manifest(bundle_root)
+        if resolved_preseed_path is not None:
+            preseed_manifest = _embed_repo_preseed_into_initrd(
+                initrd_path=Path(bundled_initrd),
+                preseed_path=resolved_preseed_path,
+                bundle_root=bundle_root,
+                session=session,
+            )
+        else:
+            _clear_existing_initrd_preseed_manifest(bundle_root)
+        _clear_existing_iso_scan_selection_manifest(bundle_root)
+        if source_role == "netinst":
+            iso_scan_selection_manifest = _enforce_exact_iso_scan_filename(
+                initrd_path=Path(bundled_initrd),
+                bundle_root=bundle_root,
+                session=session,
+            )
     bundled_iso = ""
     if iso_path:
         payload_dir = bundle_root / "payload"
@@ -573,6 +614,7 @@ def _rebuild_debian_netinst_initrd_modules(
     selected_options: list[str],
     bundle_root: Path,
     module_source_strategy: str,
+    session: _InstallerInitrdSession | None = None,
 ) -> dict[str, Any]:
     _status_checklist(1, 6, "Tools", "Verifying the helper tools needed to inspect the installer initrd.")
     _ensure_installer_initrd_prepare_deps()
@@ -626,10 +668,11 @@ def _rebuild_debian_netinst_initrd_modules(
             changed = True
             _status_checklist(5, 6, "Apply Modules", "Source rebuild selected; rebuilding matching Debian installer udebs for the selected non-builtin support.")
             ensure_debian_rebuild_deps()
-            initrd_tree = workspace_dir / "installer-initrd"
+            initrd_tree = session.tree() if session is not None else workspace_dir / "installer-initrd"
             initrd_tree.mkdir(parents=True, exist_ok=True)
             _status_checklist(5, 6, "Apply Modules", "Extracting installer initrd so rebuilt udebs can be injected.")
-            _extract_initrd_archive(initrd_path, initrd_tree)
+            if session is None:
+                _extract_initrd_archive(initrd_path, initrd_tree)
             unresolved_metadata = _selected_debian_netinst_module_metadata(fallback_options)
             udeb_manifest = _build_installer_kernel_udebs(
                 architecture=_infer_architecture_from_kernel_version(kernel_version),
@@ -647,7 +690,10 @@ def _rebuild_debian_netinst_initrd_modules(
             _status_checklist(5, 6, "Apply Modules", "Refreshing initrd module dependency metadata with depmod.")
             _run_logged(["depmod", "-b", str(initrd_tree), kernel_version], cwd=workspace_dir, log_file=log_file)
             _status_checklist(5, 6, "Apply Modules", "Repacking installer initrd.gz.")
-            _repack_initrd_archive(initrd_tree, initrd_path)
+            if session is None:
+                _repack_initrd_archive(initrd_tree, initrd_path)
+            else:
+                session.changed = True
         elif module_source_strategy == MODULE_SOURCE_STRATEGY_HOST_KERNEL and unresolved_options:
             unresolved = ", ".join(unresolved_options)
             raise RuntimeError(
@@ -658,10 +704,11 @@ def _rebuild_debian_netinst_initrd_modules(
             changed = True
             _status_checklist(5, 6, "Apply Modules", "Copying required kernel modules and their dependency closure into the installer initrd.")
             _ensure_installer_initrd_module_copy_deps()
-            initrd_tree = workspace_dir / "installer-initrd"
+            initrd_tree = session.tree() if session is not None else workspace_dir / "installer-initrd"
             initrd_tree.mkdir(parents=True, exist_ok=True)
             _status_checklist(5, 6, "Apply Modules", "Extracting installer initrd for module copy.")
-            _extract_initrd_archive(initrd_path, initrd_tree)
+            if session is None:
+                _extract_initrd_archive(initrd_path, initrd_tree)
             module_tree_root = _normalize_module_tree_root(Path(inspection["module_tree_dir"]), kernel_version)
             destination_root = _resolve_initrd_module_destination_root(initrd_tree, kernel_version)
             module_paths = []
@@ -687,7 +734,10 @@ def _rebuild_debian_netinst_initrd_modules(
                 log_file=log_file,
             )
             _status_checklist(5, 6, "Apply Modules", "Repacking installer initrd.gz.")
-            _repack_initrd_archive(initrd_tree, initrd_path)
+            if session is None:
+                _repack_initrd_archive(initrd_tree, initrd_path)
+            else:
+                session.changed = True
         else:
             _status_checklist(5, 6, "Apply Modules", "Selected support is already built into the matched kernel; no initrd mutation is required.")
         result_manifest = {
@@ -962,6 +1012,7 @@ def _enforce_exact_iso_scan_filename(
     *,
     initrd_path: Path,
     bundle_root: Path,
+    session: _InstallerInitrdSession | None = None,
 ) -> dict[str, Any]:
     if not initrd_path.is_file() or initrd_path.stat().st_size <= 0:
         raise ValueError(f"installer initrd is not a non-empty regular file: {initrd_path}")
@@ -974,9 +1025,10 @@ def _enforce_exact_iso_scan_filename(
     for path in (workspace_dir, state_dir, log_dir):
         path.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{run_id}-iso-scan.log"
-    initrd_tree = workspace_dir / "installer-initrd"
+    initrd_tree = session.tree() if session is not None else workspace_dir / "installer-initrd"
     initrd_tree.mkdir(parents=True, exist_ok=True)
-    _extract_initrd_archive(initrd_path, initrd_tree)
+    if session is None:
+        _extract_initrd_archive(initrd_path, initrd_tree)
     postinst_path = initrd_tree / "var" / "lib" / "dpkg" / "info" / "iso-scan.postinst"
     resolved_tree = initrd_tree.resolve()
     resolved_postinst = postinst_path.resolve()
@@ -1011,7 +1063,10 @@ def _enforce_exact_iso_scan_filename(
     if ISO_SCAN_EXACT_SELECTION_BLOCK.strip("\n") not in patched_text:
         raise RuntimeError("exact iso-scan/filename selection block was not present after patching")
     if changed:
-        _repack_initrd_archive(initrd_tree, initrd_path)
+        if session is None:
+            _repack_initrd_archive(initrd_tree, initrd_path)
+        else:
+            session.changed = True
 
     result_manifest = {
         "schema_version": 1,
@@ -1045,6 +1100,7 @@ def _embed_initrd_overlay_into_initrd(
     initrd_path: Path,
     overlay_dir: Path,
     bundle_root: Path,
+    session: _InstallerInitrdSession | None = None,
 ) -> dict[str, Any]:
     if not initrd_path.is_file() or initrd_path.stat().st_size <= 0:
         raise ValueError(f"installer initrd is not a non-empty regular file: {initrd_path}")
@@ -1057,11 +1113,15 @@ def _embed_initrd_overlay_into_initrd(
     for managed_path in (workspace_dir, state_dir, log_dir):
         managed_path.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{run_id}-overlay.log"
-    initrd_tree = workspace_dir / "installer-initrd"
+    initrd_tree = session.tree() if session is not None else workspace_dir / "installer-initrd"
     initrd_tree.mkdir(parents=True, exist_ok=True)
-    _extract_initrd_archive(initrd_path, initrd_tree)
+    if session is None:
+        _extract_initrd_archive(initrd_path, initrd_tree)
     merged = merge_initrd_overlay(overlay_dir, initrd_tree)
-    _repack_initrd_archive(initrd_tree, initrd_path)
+    if session is None:
+        _repack_initrd_archive(initrd_tree, initrd_path)
+    else:
+        session.changed = True
     result_manifest = {
         "schema_version": 1,
         "run_id": run_id,
@@ -1089,6 +1149,7 @@ def _embed_repo_preseed_into_initrd(
     initrd_path: Path,
     preseed_path: Path,
     bundle_root: Path,
+    session: _InstallerInitrdSession | None = None,
 ) -> dict[str, Any]:
     if not preseed_path.is_file():
         raise ValueError(f"initrd_preseed_path is not a regular file: {preseed_path}")
@@ -1104,13 +1165,17 @@ def _embed_repo_preseed_into_initrd(
     with log_path.open("w", encoding="utf-8") as log_file:
         _log(log_file, f"Embedded repo preseed path: {preseed_path}")
         _log(log_file, f"Installer initrd path: {initrd_path}")
-        initrd_tree = workspace_dir / "installer-initrd"
+        initrd_tree = session.tree() if session is not None else workspace_dir / "installer-initrd"
         initrd_tree.mkdir(parents=True, exist_ok=True)
         _status_checklist(2, 4, "Preseed", "Extracting installer initrd so /preseed.cfg can be updated.")
-        _extract_initrd_archive(initrd_path, initrd_tree)
+        if session is None:
+            _extract_initrd_archive(initrd_path, initrd_tree)
         shutil.copy2(preseed_path, initrd_tree / "preseed.cfg")
         _status_checklist(3, 4, "Preseed", "Repacking installer initrd.gz with embedded /preseed.cfg.")
-        _repack_initrd_archive(initrd_tree, initrd_path)
+        if session is None:
+            _repack_initrd_archive(initrd_tree, initrd_path)
+        else:
+            session.changed = True
         result_manifest = {
             "run_id": run_id,
             "initrd_path": str(initrd_path),

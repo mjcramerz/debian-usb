@@ -23,7 +23,7 @@ func (a *App) plannedExecutionsMenu() (menuAction, error) {
 		}
 		printHeader("Planned Execution")
 		printSection("Selected", plannedExecutionRows(execution)...)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Run this planned execution", Detail: "Rewrite a USB using the saved plan parameters."},
 			menuEntry{Key: "2", Label: "Edit this planned execution", Detail: "Change stored source paths, target device, persistence, and override fields."},
 			menuEntry{Key: "3", Label: "Delete this planned execution", Detail: "Remove the stored JSON plan from disk."},
@@ -78,13 +78,12 @@ func (a *App) choosePlannedExecution(title string) (PlannedExecution, menuAction
 	}
 	for {
 		printHeader(title)
-		rows := make([]infoRow, 0, len(executions))
+		entries := make([]menuEntry, 0, len(executions)+2)
 		for index, execution := range executions {
-			key := strconv.Itoa(index + 1)
-			rows = append(rows, infoRow{Label: key + ". " + execution.RunID, Value: plannedExecutionDetail(execution)})
+			entries = append(entries, menuEntry{Key: strconv.Itoa(index + 1), Label: execution.RunID, Detail: plannedExecutionDetail(execution)})
 		}
-		printSection("Saved plans", rows...)
-		printMenu(menuEntry{Key: "b", Label: "Go Back"}, menuEntry{Key: "e", Label: "Exit"})
+		entries = append(entries, menuEntry{Key: "b", Label: "Go Back"}, menuEntry{Key: "e", Label: "Exit"})
+		a.printMenu(entries...)
 		choice, err := a.promptChoice("Select a planned execution")
 		if err != nil {
 			return PlannedExecution{}, menuStay, err
@@ -137,7 +136,9 @@ func (a *App) executePlannedExecution(execution PlannedExecution) (menuAction, e
 		return action, err
 	}
 	printHeader("Review Planned Execution")
-	printSection("Technical Specs", plannedExecutionTechnicalSpecRows(execution, Device{Path: targetPath})...)
+	if err := a.reviewSavedPlan(&execution, targetPath, false); err != nil {
+		return menuStay, err
+	}
 	confirmed, err := a.promptYesNo("Proceed with planned USB creation", false)
 	if err != nil {
 		return menuStay, err
@@ -231,11 +232,11 @@ func (a *App) editPlannedExecution(execution PlannedExecution) (bool, menuAction
 			entries = append(entries, multiOSPlannedExecutionEditMenuEntries(updated)...)
 		}
 		entries = append(entries,
-			menuEntry{Key: "8", Label: "Save Changes"},
+			menuEntry{Key: "s", Label: "Save Changes"},
 			menuEntry{Key: "b", Label: "Discard and Go Back"},
 			menuEntry{Key: "e", Label: "Exit"},
 		)
-		printMenu(entries...)
+		a.printMenu(entries...)
 		choice, err := a.promptChoice("Select an edit")
 		if err != nil {
 			return false, menuStay, err
@@ -248,7 +249,7 @@ func (a *App) editPlannedExecution(execution PlannedExecution) (bool, menuAction
 			}
 			updated.TargetDevicePath = normalizePathInput(target)
 			changed = true
-		case "2", "3", "4", "5", "6", "7":
+		case "2", "3", "4", "5", "6", "7", "8":
 			var didChange bool
 			if updated.Kind == plannedExecutionKindSingle {
 				didChange, err = a.editSinglePlannedExecutionField(&updated, choice)
@@ -259,7 +260,7 @@ func (a *App) editPlannedExecution(execution PlannedExecution) (bool, menuAction
 				return false, menuStay, err
 			}
 			changed = changed || didChange
-		case "8":
+		case "s":
 			if !changed {
 				fmt.Println("No changes made.")
 				return false, menuStay, nil
@@ -323,20 +324,19 @@ func (a *App) editSinglePlannedExecutionField(execution *PlannedExecution, choic
 	req := createRequestFromPlan(plan)
 	switch choice {
 	case "2":
-		isoPath, err := a.promptRequiredString("ISO path", plan.ISOPath)
+		preparation, action, err := a.collectSourceSelection(profileSpecs[req.Profile], req.SourceRole)
+		if err != nil || action != menuStay {
+			return false, err
+		}
+		if req.Preparation != nil && req.SourceRole == multiOSSourceRolePrimary {
+			preparation.InitrdOverlayDir = req.Preparation.InitrdOverlayDir
+		}
+		req.Preparation = preparation
+		req.ISOPath = preparation.ISO.Path
+		req.Inspection, err = a.inspectSelectedSource(profileSpecs[req.Profile], req.SourceRole, preparation)
 		if err != nil {
 			return false, err
 		}
-		resolvedISOPath, err := resolveAbsolutePathInput(isoPath)
-		if err != nil {
-			return false, err
-		}
-		req.ISOPath = resolvedISOPath
-		inspection, err := a.backend.InspectSource(req.Profile, req.ISOPath, req.SourceRole)
-		if err != nil {
-			return false, err
-		}
-		req.Inspection = inspection
 	case "3":
 		spec := profileSpecs[req.Profile]
 		mode, action, err := a.chooseWriteMode(spec, req.Inspection, req.SourceRole)
@@ -357,6 +357,7 @@ func (a *App) editSinglePlannedExecutionField(execution *PlannedExecution, choic
 			req.KernelArgs = ""
 			req.KernelPath = ""
 			req.InitrdPath = ""
+			req.LiveToolGroups = []string{}
 		}
 	case "4":
 		if req.WriteMode != writeModeManaged || !isLiveCapableMedia(req.Inspection.MediaClass) {
@@ -377,6 +378,9 @@ func (a *App) editSinglePlannedExecutionField(execution *PlannedExecution, choic
 		req.Persistence = !req.Persistence
 		if req.Persistence {
 			req.PersistenceMode = persistenceModePlain
+			if req.Profile == profileTails {
+				req.PersistenceMode = persistenceModeEncrypted
+			}
 			req.PersistenceSizeGiB = positiveOrDefault(req.PersistenceSizeGiB, a.config.DefaultPersistenceSizeGiB)
 		} else {
 			req.PersistenceMode = persistenceModeNone
@@ -387,7 +391,7 @@ func (a *App) editSinglePlannedExecutionField(execution *PlannedExecution, choic
 			fmt.Println("Enable persistence before setting persistence mode or size.")
 			return false, nil
 		}
-		if req.Inspection.SupportsEncryptedPersistence {
+		if req.Inspection.SupportsEncryptedPersistence || remasterEncryptedPersistenceEligible(profileSpecs[req.Profile], req.SourceRole, req.Inspection) {
 			mode, cancelled, err := a.choosePersistenceModeForProfile(req.Profile)
 			if err != nil {
 				return false, err
@@ -454,6 +458,7 @@ func (a *App) editSinglePlannedExecutionField(execution *PlannedExecution, choic
 	if err != nil {
 		return false, err
 	}
+	updatedPlan.TargetDevice = plan.TargetDevice
 	execution.SinglePlan = &updatedPlan
 	execution.Title = updatedPlan.Title
 	return true, nil
@@ -462,6 +467,8 @@ func (a *App) editSinglePlannedExecutionField(execution *PlannedExecution, choic
 func createRequestFromPlan(plan CreatePlan) CreateRequest {
 	return CreateRequest{
 		Profile:                     plan.Profile,
+		SourceRole:                  blankIfEmpty(plan.SourceRole, multiOSSourceRolePrimary),
+		Preparation:                 cloneSourcePreparation(plan.Preparation),
 		WriteMode:                   plan.WriteMode,
 		ISOPath:                     plan.ISOPath,
 		Inspection:                  inspectionFromCreatePlan(plan),
@@ -535,7 +542,7 @@ func (a *App) chooseMultiOSPlanItem(plan MultiOSPlan) (int, bool, error) {
 			})
 		}
 		entries = append(entries, menuEntry{Key: "b", Label: "Go Back"})
-		printMenu(entries...)
+		a.printMenu(entries...)
 		choice, err := a.promptChoice("Select a payload item")
 		if err != nil {
 			return 0, false, err
@@ -588,27 +595,26 @@ func (a *App) editMultiOSRequestItem(request *MultiOSRequest, index int) (bool, 
 			entries = append(entries, menuEntry{Key: "6", Label: "Edit live overrides"})
 		}
 		entries = append(entries, menuEntry{Key: "b", Label: "Go Back"})
-		printMenu(entries...)
+		a.printMenu(entries...)
 		choice, err := a.promptChoice("Select an edit")
 		if err != nil {
 			return false, err
 		}
 		switch choice {
 		case "1":
-			isoPath, err := a.promptRequiredString("ISO path", item.ISOPath)
+			preparation, action, err := a.collectSourceSelection(profileSpecs[item.Profile], item.SourceRole)
+			if err != nil || action != menuStay {
+				return false, err
+			}
+			if item.Preparation != nil && item.SourceRole == multiOSSourceRolePrimary {
+				preparation.InitrdOverlayDir = item.Preparation.InitrdOverlayDir
+			}
+			item.Preparation = preparation
+			item.ISOPath = preparation.ISO.Path
+			item.Inspection, err = a.inspectSelectedSource(profileSpecs[item.Profile], item.SourceRole, preparation)
 			if err != nil {
 				return false, err
 			}
-			resolvedISOPath, err := resolveAbsolutePathInput(isoPath)
-			if err != nil {
-				return false, err
-			}
-			item.ISOPath = resolvedISOPath
-			inspection, err := a.backend.InspectSource(item.Profile, item.ISOPath, item.SourceRole)
-			if err != nil {
-				return false, err
-			}
-			item.Inspection = inspection
 			return true, nil
 		case "2":
 			if item.SourceRole == multiOSSourceRoleNetinst || item.SourceRole == multiOSSourceRoleNetboot || !isLiveCapableMedia(item.Inspection.MediaClass) {
@@ -630,6 +636,9 @@ func (a *App) editMultiOSRequestItem(request *MultiOSRequest, index int) (bool, 
 			item.Persistence = !item.Persistence
 			if item.Persistence {
 				item.PersistenceMode = persistenceModePlain
+				if item.Profile == profileTails {
+					item.PersistenceMode = persistenceModeEncrypted
+				}
 				item.PersistenceSizeGiB = positiveOrDefault(item.PersistenceSizeGiB, a.config.DefaultPersistenceSizeGiB)
 			} else {
 				item.PersistenceMode = persistenceModeNone
@@ -641,7 +650,7 @@ func (a *App) editMultiOSRequestItem(request *MultiOSRequest, index int) (bool, 
 				fmt.Println("Enable persistence before setting persistence mode or size.")
 				return false, nil
 			}
-			if item.Inspection.SupportsEncryptedPersistence {
+			if item.Inspection.SupportsEncryptedPersistence || remasterEncryptedPersistenceEligible(profileSpecs[item.Profile], item.SourceRole, item.Inspection) {
 				mode, cancelled, err := a.choosePersistenceModeForProfile(item.Profile)
 				if err != nil {
 					return false, err
@@ -731,6 +740,7 @@ func multiOSRequestFromPlan(plan MultiOSPlan) MultiOSRequest {
 		}
 		request.Items = append(request.Items, MultiOSRequestItem{
 			Profile:            item.Profile,
+			Preparation:        cloneSourcePreparation(item.Preparation),
 			SourceRole:         blankIfEmpty(item.SourceRole, multiOSSourceRolePrimary),
 			ISOPath:            item.ISOPath,
 			Inspection:         inspectionFromMultiOSPlanItem(item),

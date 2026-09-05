@@ -12,6 +12,36 @@ from debian_usb.config import load_config
 
 
 class DownloadTests(unittest.TestCase):
+    def test_reviewed_url_rejects_changed_configuration_before_cache_use(self) -> None:
+        with patch.object(downloads, "_managed_source_url", return_value="https://example.test/new.iso"), patch.object(
+            downloads, "_cached_managed_destination"
+        ) as cache:
+            with self.assertRaisesRegex(ValueError, "changed since review"):
+                downloads.download_managed_source("config", "DEBIAN_LIVE_ISO_URL",
+                                                  expected_url="https://example.test/reviewed.iso")
+            cache.assert_not_called()
+
+    def test_reviewed_url_does_not_reuse_different_cached_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            key = "DEBIAN_NETINST_INITRD_STABLE_URL"
+            url = "https://example.test/reviewed/initrd.gz"
+            with patch.object(downloads, "BOOT_ASSET_DOWNLOAD_DIR", root), patch.object(
+                downloads, "_managed_source_url", return_value=url
+            ):
+                destination = downloads._download_destination(key, url)
+                destination.parent.mkdir(parents=True)
+                destination.write_bytes(b"stale")
+                downloads._write_cached_source_url(destination, "https://example.test/other/initrd.gz")
+                def fetch(_url: str, path: Path) -> None:
+                    self.assertEqual(_url, url)
+                    path.write_bytes(b"reviewed")
+                with patch.object(downloads, "_download_http", side_effect=fetch) as fetched:
+                    result = downloads.download_managed_source("config", key, expected_url=url)
+                self.assertFalse(result["cached"])
+                self.assertEqual(destination.read_bytes(), b"reviewed")
+                fetched.assert_called_once()
+
     def test_download_managed_source_scopes_cache_by_key(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

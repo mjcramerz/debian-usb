@@ -27,6 +27,7 @@ from .live_hooks import (
     LIVE_SYSTEMD_DISABLE_LINKS,
     LIVE_SYSTEMD_MASK_UNITS,
     stage_debian_live_config_hooks,
+    stage_debian_live_apt_policy,
     stage_debian_live_locale,
     stage_debian_live_medium_wifi_config,
     stage_debian_live_wifi_config,
@@ -532,8 +533,9 @@ def _materialize_workspace(build_root: Path, plan: dict[str, Any], log_file: Any
         _stage_binary_packages(local_udeb_dir, packages_binary_dir, ".udeb")
 
     if not netinst_only:
-        for policy_root in (includes_chroot_early_dir, includes_chroot_dir):
-            stage_live_systemd_masks(policy_root)
+        # Early masks break fwupd maintainer-script presets. live-build guards
+        # service starts during package installation; mask only after packages.
+        stage_live_systemd_masks(includes_chroot_dir)
         configure_locale = plan["distro"] == DISTRO_DEBIAN
         if configure_locale:
             for policy_root in (includes_chroot_early_dir, includes_chroot_dir):
@@ -554,6 +556,7 @@ def _materialize_workspace(build_root: Path, plan: dict[str, Any], log_file: Any
 
     if plan["distro"] == DISTRO_DEBIAN and not netinst_only:
         stage_debian_live_wifi_config(includes_chroot_dir)
+        stage_debian_live_apt_policy(includes_chroot_dir)
         stage_debian_live_config_hooks(includes_binary_dir / "live")
         stage_debian_live_medium_wifi_config(includes_binary_dir / "live")
 

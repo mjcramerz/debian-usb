@@ -815,6 +815,7 @@ class RebuildISOTests(unittest.TestCase):
                     "new-initrd",
                 )
 
+    @unittest.skipUnless(shutil.which("dpkg-divert"), "requires dpkg-divert")
     def test_apply_live_tools_remaster_installs_profile_packages_and_repacks_squashfs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -841,6 +842,31 @@ class RebuildISOTests(unittest.TestCase):
                         encoding="utf-8",
                     )
                     (default_dir / "locale").symlink_to("../locale.conf")
+                    # Real Live package ownership reproduces the reported
+                    # cleanup failure; all mount/ISO operations remain fixtures.
+                    wrapper = live_root / "usr/bin/live-update-initramfs"
+                    wrapper.parent.mkdir(parents=True)
+                    wrapper.write_text("original live wrapper\n", encoding="utf-8")
+                    binary = live_root / "usr/sbin/update-initramfs"
+                    binary.parent.mkdir(parents=True)
+                    binary.symlink_to("/usr/bin/live-update-initramfs")
+                    binary.with_name("update-initramfs.orig.initramfs-tools").write_text(
+                        "original engine\n", encoding="utf-8")
+                    info = live_root / "var/lib/dpkg/info"
+                    info.mkdir(parents=True)
+                    (info / "live-tools.list").write_text(
+                        "/usr/sbin/update-initramfs\n/usr/bin/live-update-initramfs\n", encoding="utf-8")
+                    (info.parent / "status").write_text(
+                        "Package: live-tools\nStatus: install ok installed\nArchitecture: all\n"
+                        "Version: 1:20240525\nMaintainer: Test <test@example.invalid>\nDescription: fixture\n\n",
+                        encoding="utf-8")
+                    subprocess.run(["dpkg-divert", "--root=" + str(live_root), "--package", "live-tools",
+                                    "--add", "--no-rename", "--divert", "/usr/sbin/update-initramfs.orig.initramfs-tools",
+                                    "/usr/sbin/update-initramfs"],
+                                   check=True, capture_output=True, encoding="utf-8")
+                elif command[:3] == ["chroot", str(live_root), "dpkg-divert"]:
+                    subprocess.run(["dpkg-divert", "--root=" + str(live_root), *command[3:]],
+                                   check=True, capture_output=True, encoding="utf-8")
 
             with patch("debian_usb.rebuild_iso._run_logged", side_effect=fake_run_logged):
                 with patch("debian_usb.rebuild_iso._install_packages_in_chroot") as install_packages:
@@ -862,6 +888,17 @@ class RebuildISOTests(unittest.TestCase):
                                             processors=2,
                                         )
 
+            self.assertTrue((live_root / "usr/sbin/update-initramfs").is_symlink())
+            self.assertEqual((live_root / "usr/bin/live-update-initramfs").read_text(encoding="utf-8"),
+                             "original live wrapper\n")
+            self.assertFalse((live_root / "usr/bin/live-update-initramfs.debian-usb-real").exists())
+            self.assertEqual((live_root / "var/lib/dpkg/diversions").read_text(encoding="utf-8"),
+                             "/usr/sbin/update-initramfs\n/usr/sbin/update-initramfs.orig.initramfs-tools\nlive-tools\n")
+            generation = [i for i, command in enumerate(run_logged_calls) if "mkinitramfs" in command]
+            repack = [i for i, command in enumerate(run_logged_calls) if command[0] == "mksquashfs"]
+            self.assertEqual(len(generation), 1)
+            self.assertEqual(len(repack), 1)
+            self.assertLess(generation[0], repack[0])
             self.assertEqual(
                 modified,
                 [
@@ -1180,16 +1217,17 @@ class RebuildISOTests(unittest.TestCase):
                     check=False,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
+                # unmkinitramfs releases may use early/early2/main directories.
                 self.assertEqual(
-                    (extracted_all / "kernel/x86/microcode/GenuineIntel.bin").read_bytes(),
+                    next(extracted_all.rglob("GenuineIntel.bin")).read_bytes(),
                     b"early-microcode",
                 )
                 self.assertEqual(
-                    (extracted_all / "usr/lib/modules/test/early.ko").read_bytes(),
+                    next(extracted_all.rglob("early.ko")).read_bytes(),
                     b"early-module",
                 )
                 self.assertEqual(
-                    (extracted_all / "live.env").read_text(encoding="utf-8"),
+                    next(extracted_all.rglob("live.env")).read_text(encoding="utf-8"),
                     "LIVE_WIFI_PASSPHRASE=''\n",
                 )
 

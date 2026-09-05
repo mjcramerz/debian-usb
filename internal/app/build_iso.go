@@ -115,7 +115,7 @@ func (a *App) buildISOMenu() (menuAction, error) {
 			infoRow{Label: "Bundled", Value: "Debian Live, Debian Netinst, Kali Live, Kali Netinst"},
 			infoRow{Label: "Advanced", Value: "The legacy Debian manual planner remains available for full custom plans"},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Debian Live Profile", Detail: "bundled live-build.json + live-build.conf"},
 			menuEntry{Key: "2", Label: "Debian Netinst Profile", Detail: "bundled netinst-build.json + netinst-build.conf"},
 			menuEntry{Key: "3", Label: "Kali Live Profile", Detail: "bundled live-build.json + live-build.conf"},
@@ -198,17 +198,6 @@ func (a *App) handleBundledBuildISOProfile(key string) (menuAction, error) {
 		infoRow{Label: "Suite", Value: plan.Suite},
 		infoRow{Label: "Installer mode", Value: plan.InstallerMode},
 	)
-	proceed, err := a.promptYesNo("Check and install missing Build Custom ISO host dependencies now", true)
-	if err != nil {
-		return menuStay, err
-	}
-	if !proceed {
-		fmt.Println("ISO build cancelled before dependency validation.")
-		return menuStay, nil
-	}
-	if err := a.backend.EnsureDebianBuildDeps(); err != nil {
-		return menuStay, err
-	}
 
 	outputDir, err := a.promptRequiredString("Output directory for the finished ISO", plan.OutputDir)
 	if err != nil {
@@ -258,13 +247,16 @@ func (a *App) handleBundledBuildISOProfile(key string) (menuAction, error) {
 		infoRow{Label: "Companion config", Value: confPath},
 	)
 	a.printDebianBuildISOPlan(plan)
-	confirmed, err := a.promptYesNo("Proceed with bundled ISO build", false)
+	confirmed, err := a.promptYesNo("Install required host dependencies and build this ISO", false)
 	if err != nil {
 		return menuStay, err
 	}
 	if !confirmed {
 		fmt.Println("Bundled ISO build cancelled.")
 		return menuStay, nil
+	}
+	if err := a.backend.EnsureDebianBuildDeps(); err != nil {
+		return menuStay, err
 	}
 	result, err := a.backend.BuildDebianISO(plan)
 	if err != nil {
@@ -294,23 +286,16 @@ func (a *App) handleBuildISODebian() (menuAction, error) {
 		infoRow{Label: "Kernel model", Value: "Debian packages or repo stubs"},
 		infoRow{Label: "Installer", Value: "optional d-i + udeb integration"},
 	)
-	proceed, err := a.promptYesNo("Check and install missing Debian Build Custom ISO host dependencies now", true)
-	if err != nil {
-		return menuStay, err
-	}
-	if !proceed {
-		fmt.Println("Debian ISO build cancelled before dependency validation.")
-		return menuStay, nil
-	}
-	if err := a.backend.EnsureDebianBuildDeps(); err != nil {
-		return menuStay, err
-	}
+
 	plan, action, err := a.collectDebianBuildISOPlan()
 	if err != nil {
 		return menuStay, err
 	}
 	if action != menuStay {
 		return action, nil
+	}
+	if err := a.backend.EnsureDebianBuildDeps(); err != nil {
+		return menuStay, err
 	}
 	result, err := a.backend.BuildDebianISO(plan)
 	if err != nil {
@@ -971,7 +956,7 @@ func (a *App) collectDebianBuildISOPlan() (BuildISOPlan, menuAction, error) {
 	applyLiveHookKernelArgsToBuildPlan(a.config, &plan)
 
 	a.printDebianBuildISOPlan(plan)
-	confirmed, err := a.promptYesNo("Proceed with Debian ISO build", false)
+	confirmed, err := a.promptYesNo("Install required host dependencies and build this ISO", false)
 	if err != nil {
 		return plan, menuStay, err
 	}
@@ -1115,7 +1100,7 @@ func (a *App) printBuildISOKernelEvidence(result BuildISOKernelInspectResult) {
 func (a *App) chooseBuildISOInstallerMode(current string) (string, menuAction, error) {
 	for {
 		printHeader("Installer Mode")
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "None", Detail: "Build a live ISO without Debian Installer integration."},
 			menuEntry{Key: "2", Label: "Netinst", Detail: "Build installer-only media with --debian-installer netinst, no --system, and no Live rootfs inputs."},
 			menuEntry{Key: "3", Label: "Live", Detail: "Include the live Debian Installer copy-to-disk path."},
@@ -1149,7 +1134,7 @@ func (a *App) chooseBuildISOInstallerMode(current string) (string, menuAction, e
 func (a *App) chooseBuildISOKernelMode(current string) (string, menuAction, error) {
 	for {
 		printHeader("Kernel Mode")
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Stock Debian", Detail: "Use the suite default Debian kernel packages."},
 			menuEntry{Key: "2", Label: "Repository Package Stub", Detail: "Use custom kernel package stubs available in configured APT repositories."},
 			menuEntry{Key: "3", Label: "Local Kernel .deb Directory", Detail: "Stage local custom kernel .deb packages into the live-build tree."},
@@ -1186,7 +1171,7 @@ func (a *App) chooseBuildISOKernelMode(current string) (string, menuAction, erro
 func (a *App) chooseBuildISORootFSFormat(current string) (string, menuAction, error) {
 	for {
 		printHeader("Root Filesystem Format")
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "SquashFS", Detail: "Leave the upstream live-build root filesystem format unchanged."},
 			menuEntry{Key: "2", Label: "EROFS", Detail: "Replace the generated live root image with an EROFS image through a binary hook while preserving the upstream filename."},
 			menuEntry{Key: "b", Label: "Go Back"},
@@ -1217,7 +1202,7 @@ func (a *App) chooseBuildISORootFSFormat(current string) (string, menuAction, er
 func (a *App) chooseBuildISOEROFSInstallerPolicy(current string) (string, menuAction, error) {
 	for {
 		printHeader("EROFS Installer Policy")
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Warn", Detail: "Allow the build to continue but warn when explicit installer-side EROFS integration inputs are incomplete."},
 			menuEntry{Key: "2", Label: "Require", Detail: "Require installer-side .udeb inputs plus includes.installer content for EROFS-aware Debian Installer integration."},
 			menuEntry{Key: "b", Label: "Go Back"},
@@ -1248,7 +1233,7 @@ func (a *App) chooseBuildISOEROFSInstallerPolicy(current string) (string, menuAc
 func (a *App) chooseBuildISODirectDIBuildSourceMode(current string) (string, menuAction, error) {
 	for {
 		printHeader("Direct d-i Source")
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "APT Source", Detail: "Fetch the Debian Installer source package with apt source in an isolated workspace."},
 			menuEntry{Key: "2", Label: "Local Tree", Detail: "Copy an existing Debian Installer source tree into the isolated build workspace."},
 			menuEntry{Key: "b", Label: "Go Back"},

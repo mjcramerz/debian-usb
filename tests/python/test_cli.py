@@ -181,6 +181,8 @@ class CLITests(unittest.TestCase):
             "/tmp/output",
             selected_groups=None,
             live_kernel_args="",
+            overlay_dir="",
+            ensure_encrypted_persistence=False,
         )
         self.assertEqual(json.loads(stdout.getvalue()), payload)
 
@@ -208,6 +210,8 @@ class CLITests(unittest.TestCase):
             "",
             selected_groups=[],
             live_kernel_args="live-config.hooks=medium debian_usb.profile=test",
+            overlay_dir="",
+            ensure_encrypted_persistence=False,
         )
 
     def test_main_validates_live_wifi_config_without_echoing_values(self) -> None:

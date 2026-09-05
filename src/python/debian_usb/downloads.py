@@ -299,9 +299,18 @@ def _download_torrent(url: str, destination: Path) -> None:
         shutil.move(str(candidates[0]), str(destination))
 
 
-def download_managed_source(config_path: str, key: str) -> dict[str, Any]:
+def download_managed_source(config_path: str, key: str, *, expected_url: str = "") -> dict[str, Any]:
     configured_url = _managed_source_url(config_path, key)
+    if expected_url and configured_url != expected_url:
+        raise ValueError(f"managed source URL changed since review: {key}; review the plan again")
     cached_destination = _cached_managed_destination(key)
+    # Reviewed plans may not silently reuse a different ISO from this URL key.
+    # Legacy direct callers retain their offline cache-first behavior.
+    resolved = None
+    if expected_url:
+        resolved = _resolve_current_release_iso_url(configured_url)
+        if cached_destination is not None and _cached_source_url(cached_destination, "") != resolved[0]:
+            cached_destination = None
     if cached_destination is not None:
         _status(f"[download] {key}: using cached file {cached_destination}")
         return {
@@ -311,7 +320,7 @@ def download_managed_source(config_path: str, key: str) -> dict[str, Any]:
             "cached": True,
         }
 
-    url, resolved_current_release_iso = _resolve_current_release_iso_url(configured_url)
+    url, resolved_current_release_iso = resolved or _resolve_current_release_iso_url(configured_url)
     if resolved_current_release_iso and url != configured_url:
         _status(f"[download] {key}: resolved current release ISO to {url}")
     destination = _download_destination(key, url)

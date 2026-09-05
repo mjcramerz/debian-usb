@@ -99,6 +99,7 @@ check:
 		test -f "$$tmpdir/stage/usr/lib/debian-usb/python/debian_usb/cli.py"; \
 		test -x "$$tmpdir/stage/usr/lib/debian-usb/debian-usb-build-iso"; \
 		test -x "$$tmpdir/stage/usr/lib/debian-usb/config-hooks/0500-apt-live-medium.sh"; \
+		test -x "$$tmpdir/stage/usr/lib/debian-usb/config-hooks/live-apt-repository.py"; \
 		test -x "$$tmpdir/stage/usr/lib/debian-usb/config-hooks/1000-network-wifi.sh"; \
 		test -f "$$tmpdir/stage/usr/lib/debian-usb/initrd/debian/live/live.env"; \
 		test "$$(stat -c '%a' "$$tmpdir/stage/usr/lib/debian-usb/initrd/debian/live/live.env")" = 600; \

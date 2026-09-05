@@ -1,0 +1,43 @@
+{
+  "date": "2026-09-05",
+  "go": {
+    "version_used": "1.23.2",
+    "repository_minimum": "1.24.0",
+    "temporary_compatibility_modfile": true,
+    "tests": 157,
+    "passed": true,
+    "race": "passed",
+    "vet": "passed"
+  },
+  "python": {
+    "version": "3.13",
+    "tests": 337,
+    "passed": true,
+    "skipped": 0,
+    "batches": [
+      141,
+      79,
+      102,
+      15
+    ]
+  },
+  "shell_fixtures": {
+    "passed": 4,
+    "total": 4
+  },
+  "integration": {
+    "isolated_apt_update_and_download": "passed",
+    "dpkg_divert_success_and_failure": "passed",
+    "installer_single_archive_pass": "passed",
+    "terminal_pty": "passed",
+    "staged_install_uninstall": "passed"
+  },
+  "not_executed": [
+    "real full ISO remaster",
+    "physical USB write",
+    "BIOS/UEFI boot",
+    "Secure Boot enrollment",
+    "LUKS2 boot unlock",
+    "real Multi-OS boot"
+  ]
+}

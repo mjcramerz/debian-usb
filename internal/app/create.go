@@ -31,31 +31,22 @@ func (a *App) collectCreateRequest(spec profileSpec) (CreateRequest, menuAction,
 	req.SourceRole = sourceRole
 
 	printStepHeader(1, 4, spec.MenuLabel+" Source")
-	resolvedISOPath, action, err := a.resolveCreateSourcePath(spec, req.SourceRole)
+	preparation, action, err := a.collectSourceSelection(spec, req.SourceRole)
 	if err != nil {
 		return req, menuStay, err
 	}
 	if action != menuStay {
 		return req, action, nil
 	}
-	req.ISOPath = resolvedISOPath
+	req.Preparation = preparation
+	req.ISOPath = preparation.ISO.Path
 
-	inspection, err := a.backend.InspectSource(spec.Key, req.ISOPath, req.SourceRole)
+	inspection, err := a.inspectSelectedSource(spec, req.SourceRole, preparation)
 	if err != nil {
 		return req, menuStay, err
 	}
 	if err := validateManagedSourceSelection(spec, req.SourceRole, inspection, req.ISOPath); err != nil {
 		return req, menuStay, err
-	}
-	if req.SourceRole == multiOSSourceRolePrimary && isLiveCapableMedia(inspection.MediaClass) {
-		var liveInitrdAction menuAction
-		req.ISOPath, inspection, liveInitrdAction, err = a.promptAndApplyLiveInitrdOverlay(spec, req.ISOPath, inspection)
-		if err != nil {
-			return req, menuStay, err
-		}
-		if liveInitrdAction != menuStay {
-			return req, liveInitrdAction, nil
-		}
 	}
 	req.Inspection = inspection
 	mode, action, err := a.chooseWriteMode(spec, inspection, req.SourceRole)
@@ -66,7 +57,12 @@ func (a *App) collectCreateRequest(spec profileSpec) (CreateRequest, menuAction,
 		return req, action, nil
 	}
 	req.WriteMode = mode
-	if req.SourceRole == multiOSSourceRolePrimary && isLiveCapableMedia(inspection.MediaClass) {
+	if req.WriteMode == writeModeManaged && req.SourceRole == multiOSSourceRolePrimary && isLiveCapableMedia(inspection.MediaClass) {
+		overlay, action, err := a.collectLiveInitrdOverlay(spec, inspection)
+		if err != nil || action != menuStay {
+			return req, action, err
+		}
+		req.Preparation.InitrdOverlayDir = overlay
 		liveToolGroups, action, err := a.promptLiveToolGroups(spec.Key, nil)
 		if err != nil {
 			return req, menuStay, err
@@ -120,7 +116,7 @@ func (a *App) chooseCreateSourceRole(spec profileSpec) (string, menuAction, erro
 			infoRow{Label: "Netinst", Value: "Stage an opaque ISO plus separately downloaded hd-media/vmlinuz and hd-media/initrd.gz"},
 			infoRow{Label: "Netboot", Value: "Stage dedicated kernel/initrd assets only; no ISO payload is used"},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Live ISO", Detail: "Opaque live ISO; installer entries in hybrid media are ignored"},
 			menuEntry{Key: "2", Label: "Netinst (hd-media)", Detail: "Opaque netinst ISO plus separate hd-media kernel/initrd"},
 			menuEntry{Key: "3", Label: "Netboot", Detail: "Managed kernel/initrd assets without an ISO payload"},
@@ -148,90 +144,6 @@ func (a *App) chooseCreateSourceRole(spec profileSpec) (string, menuAction, erro
 	}
 }
 
-func (a *App) resolveCreateSourcePath(spec profileSpec, sourceRole string) (string, menuAction, error) {
-	if sourceRole == multiOSSourceRoleNetinst || sourceRole == multiOSSourceRoleNetboot {
-		return a.resolvePreparedInstallerSourcePath(spec, sourceRole)
-	}
-
-	stableURLKey := managedISOSourceRoleKey(spec.Key, sourceRole, managedSourceReleaseStable)
-	testingURLKey := managedISOSourceRoleKey(spec.Key, sourceRole, managedSourceReleaseTesting)
-	if stableURLKey == "" || (managedSourceURLValue(a.config, stableURLKey) == "" && managedSourceURLValue(a.config, testingURLKey) == "") {
-		a.printDetectedISOs()
-		printSection(
-			"Source",
-			infoRow{Label: "Input", Value: "One local ISO path"},
-			infoRow{Label: "Use", Value: "The inspected ISO determines live, installer, or hybrid behavior"},
-		)
-		isoPath, err := a.promptRequiredString("Enter the absolute path to the ISO file", "")
-		if err != nil {
-			return "", menuStay, err
-		}
-		resolvedISOPath, err := resolveAbsolutePathInput(isoPath)
-		if err != nil {
-			return "", menuStay, err
-		}
-		return resolvedISOPath, menuStay, nil
-	}
-
-	stableLabel := managedSourceReleaseProfileLabel(spec.Key, managedSourceReleaseStable)
-	testingLabel := managedSourceReleaseProfileLabel(spec.Key, managedSourceReleaseTesting)
-	for {
-		a.printDetectedISOs()
-		printSection(
-			"Source",
-			infoRow{Label: stableLabel, Value: managedSourceURLValue(a.config, stableURLKey)},
-			infoRow{Label: testingLabel, Value: managedSourceURLValue(a.config, testingURLKey)},
-			infoRow{Label: "Local", Value: "Use an existing ISO path instead of downloading"},
-		)
-		printMenu(
-			menuEntry{Key: "1", Label: "Download ISO from Internet", Detail: "Fetch the repo-managed source into the managed download directory"},
-			menuEntry{Key: "2", Label: "Use local ISO", Detail: "Select an existing ISO file path"},
-			menuEntry{Key: "b", Label: "Go Back"},
-			menuEntry{Key: "e", Label: "Exit"},
-		)
-		choice, err := a.promptChoice("Select the source mode")
-		if err != nil {
-			return "", menuStay, err
-		}
-		switch choice {
-		case "1":
-			channel, action, err := a.promptManagedSourceReleaseChannel(spec.Key)
-			if err != nil {
-				return "", menuStay, err
-			}
-			if action != menuStay {
-				return "", action, nil
-			}
-			urlKey := managedISOSourceRoleKey(spec.Key, sourceRole, channel)
-			if urlKey == "" || managedSourceURLValue(a.config, urlKey) == "" {
-				return "", menuStay, fmt.Errorf("%s release URL is not configured for %s", managedSourceReleaseLabel(channel), spec.MultiOSLabel)
-			}
-			path, err := a.backend.DownloadManagedSource(urlKey)
-			if err != nil {
-				return "", menuStay, err
-			}
-			fmt.Printf("Downloaded %s managed source to %s.\n", strings.ToLower(managedSourceReleaseLabel(channel)), path)
-			return path, menuStay, nil
-		case "2":
-			isoPath, err := a.promptRequiredString("Enter the absolute path to the ISO file", "")
-			if err != nil {
-				return "", menuStay, err
-			}
-			resolvedISOPath, err := resolveAbsolutePathInput(isoPath)
-			if err != nil {
-				return "", menuStay, err
-			}
-			return resolvedISOPath, menuStay, nil
-		case "b":
-			return "", menuBack, nil
-		case "e":
-			return "", menuExit, nil
-		default:
-			fmt.Println("Invalid selection.")
-		}
-	}
-}
-
 func (a *App) promptManagedSourceReleaseChannel(profile string) (managedSourceReleaseChannel, menuAction, error) {
 	for {
 		stableLabel := managedSourceReleaseProfileLabel(profile, managedSourceReleaseStable)
@@ -241,7 +153,7 @@ func (a *App) promptManagedSourceReleaseChannel(profile string) (managedSourceRe
 			infoRow{Label: stableLabel, Value: "Published release ISO and installer assets"},
 			infoRow{Label: testingLabel, Value: "Pre-release or testing ISO and installer assets"},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: stableLabel, Detail: "Use the configured stable release URLs"},
 			menuEntry{Key: "2", Label: testingLabel, Detail: "Use the configured testing release URLs"},
 			menuEntry{Key: "b", Label: "Go Back"},
@@ -256,184 +168,6 @@ func (a *App) promptManagedSourceReleaseChannel(profile string) (managedSourceRe
 			return managedSourceReleaseStable, menuStay, nil
 		case "2":
 			return managedSourceReleaseTesting, menuStay, nil
-		case "b":
-			return "", menuBack, nil
-		case "e":
-			return "", menuExit, nil
-		default:
-			fmt.Println("Invalid selection.")
-		}
-	}
-}
-
-func (a *App) resolvePreparedInstallerSourcePath(spec profileSpec, sourceRole string) (string, menuAction, error) {
-	stableISOURLKey := managedISOSourceRoleKey(spec.Key, sourceRole, managedSourceReleaseStable)
-	stableKernelURLKey := managedInstallerKernelURLKey(spec.Key, sourceRole, managedSourceReleaseStable)
-	stableInitrdURLKey := managedInstallerInitrdURLKey(spec.Key, sourceRole, managedSourceReleaseStable)
-	stableLabel := managedSourceReleaseProfileLabel(spec.Key, managedSourceReleaseStable)
-	testingLabel := managedSourceReleaseProfileLabel(spec.Key, managedSourceReleaseTesting)
-
-	for {
-		a.printDetectedISOs()
-		rows := []infoRow{
-			{Label: stableLabel + " kernel", Value: managedSourceURLValue(a.config, stableKernelURLKey)},
-			{Label: stableLabel + " initrd", Value: managedSourceURLValue(a.config, stableInitrdURLKey)},
-			{Label: testingLabel, Value: "Select the testing channel after choosing Download Installer Assets"},
-		}
-		if sourceRole == multiOSSourceRoleNetinst {
-			rows = append([]infoRow{{Label: stableLabel + " ISO", Value: managedSourceURLValue(a.config, stableISOURLKey)}}, rows...)
-		}
-		printSection("Source", rows...)
-		printMenu(
-			menuEntry{Key: "1", Label: "Download Installer Assets", Detail: "Fetch the repo-managed kernel/initrd assets into the managed download directory and prepare a source bundle"},
-			menuEntry{Key: "2", Label: "Use Local Installer Assets", Detail: "Prepare a managed source bundle from local paths"},
-			menuEntry{Key: "b", Label: "Go Back"},
-			menuEntry{Key: "e", Label: "Exit"},
-		)
-		choice, err := a.promptChoice("Select the source mode")
-		if err != nil {
-			return "", menuStay, err
-		}
-		switch choice {
-		case "1":
-			channel, action, err := a.promptManagedSourceReleaseChannel(spec.Key)
-			if err != nil {
-				return "", menuStay, err
-			}
-			if action != menuStay {
-				return "", action, nil
-			}
-			isoURLKey := managedISOSourceRoleKey(spec.Key, sourceRole, channel)
-			kernelURLKey := managedInstallerKernelURLKey(spec.Key, sourceRole, channel)
-			initrdURLKey := managedInstallerInitrdURLKey(spec.Key, sourceRole, channel)
-			if kernelURLKey == "" || initrdURLKey == "" || managedSourceURLValue(a.config, kernelURLKey) == "" || managedSourceURLValue(a.config, initrdURLKey) == "" {
-				return "", menuStay, fmt.Errorf("%s installer asset URLs are not configured for %s", managedSourceReleaseLabel(channel), spec.MultiOSLabel)
-			}
-			if sourceRole == multiOSSourceRoleNetinst && (isoURLKey == "" || managedSourceURLValue(a.config, isoURLKey) == "") {
-				return "", menuStay, fmt.Errorf("%s installer ISO URL is not configured for %s", managedSourceReleaseLabel(channel), spec.MultiOSLabel)
-			}
-			rows := []infoRow{
-				{Label: "Release channel", Value: managedSourceReleaseProfileLabel(spec.Key, channel)},
-				{Label: "Kernel", Value: managedSourceURLValue(a.config, kernelURLKey)},
-				{Label: "Initrd", Value: managedSourceURLValue(a.config, initrdURLKey)},
-			}
-			if sourceRole == multiOSSourceRoleNetinst {
-				rows = append([]infoRow{{Label: "ISO", Value: managedSourceURLValue(a.config, isoURLKey)}}, rows...)
-			}
-			printSection("Download", rows...)
-			isoPath := ""
-			if sourceRole == multiOSSourceRoleNetinst {
-				isoPath, err = a.backend.DownloadManagedSource(isoURLKey)
-				if err != nil {
-					return "", menuStay, err
-				}
-			}
-			kernelPath, err := a.backend.DownloadManagedSource(kernelURLKey)
-			if err != nil {
-				return "", menuStay, err
-			}
-			initrdPath, err := a.backend.DownloadManagedSource(initrdURLKey)
-			if err != nil {
-				return "", menuStay, err
-			}
-			extraModules, action, err := a.promptManagedInstallerSourceExtraModules(spec, sourceRole, kernelPath, initrdPath)
-			if err != nil {
-				return "", menuStay, err
-			}
-			if action != menuStay {
-				return "", action, nil
-			}
-			initrdOverlayDir, action, err := a.promptInitrdOverlayContent(spec, sourceRole, "")
-			if err != nil {
-				return "", menuStay, err
-			}
-			if action != menuStay {
-				return "", action, nil
-			}
-			initrdPreseedPath, action, err := a.promptManagedInstallerSourceInitrdPreseed(spec, sourceRole)
-			if err != nil {
-				return "", menuStay, err
-			}
-			if action != menuStay {
-				return "", action, nil
-			}
-			moduleSourceStrategy, action, err := a.promptManagedInstallerSourceStrategy(spec, sourceRole, kernelPath, initrdPath, extraModules)
-			if err != nil {
-				return "", menuStay, err
-			}
-			if action != menuStay {
-				return "", action, nil
-			}
-			a.printManagedInstallerSourcePreparation(spec, sourceRole, kernelPath, initrdPath, extraModules, moduleSourceStrategy, initrdPreseedPath)
-			path, err := a.backend.PrepareManagedInstallerSource(spec.Key, sourceRole, kernelPath, initrdPath, isoPath, extraModules, moduleSourceStrategy, initrdPreseedPath, initrdOverlayDir)
-			if err != nil {
-				return "", menuStay, err
-			}
-			fmt.Printf("Prepared managed installer source at %s.\n", path)
-			return path, menuStay, nil
-		case "2":
-			isoPath := ""
-			if sourceRole == multiOSSourceRoleNetinst {
-				value, err := a.promptRequiredString("Enter the absolute path to the installer ISO file", "")
-				if err != nil {
-					return "", menuStay, err
-				}
-				isoPath, err = resolveAbsolutePathInput(value)
-				if err != nil {
-					return "", menuStay, err
-				}
-			}
-			kernelValue, err := a.promptRequiredString("Enter the absolute path to the installer kernel (vmlinuz/linux)", "")
-			if err != nil {
-				return "", menuStay, err
-			}
-			kernelPath, err := resolveAbsolutePathInput(kernelValue)
-			if err != nil {
-				return "", menuStay, err
-			}
-			initrdValue, err := a.promptRequiredString("Enter the absolute path to the installer initrd (initrd.gz)", "")
-			if err != nil {
-				return "", menuStay, err
-			}
-			initrdPath, err := resolveAbsolutePathInput(initrdValue)
-			if err != nil {
-				return "", menuStay, err
-			}
-			extraModules, action, err := a.promptManagedInstallerSourceExtraModules(spec, sourceRole, kernelPath, initrdPath)
-			if err != nil {
-				return "", menuStay, err
-			}
-			if action != menuStay {
-				return "", action, nil
-			}
-			initrdOverlayDir, action, err := a.promptInitrdOverlayContent(spec, sourceRole, "")
-			if err != nil {
-				return "", menuStay, err
-			}
-			if action != menuStay {
-				return "", action, nil
-			}
-			initrdPreseedPath, action, err := a.promptManagedInstallerSourceInitrdPreseed(spec, sourceRole)
-			if err != nil {
-				return "", menuStay, err
-			}
-			if action != menuStay {
-				return "", action, nil
-			}
-			moduleSourceStrategy, action, err := a.promptManagedInstallerSourceStrategy(spec, sourceRole, kernelPath, initrdPath, extraModules)
-			if err != nil {
-				return "", menuStay, err
-			}
-			if action != menuStay {
-				return "", action, nil
-			}
-			a.printManagedInstallerSourcePreparation(spec, sourceRole, kernelPath, initrdPath, extraModules, moduleSourceStrategy, initrdPreseedPath)
-			path, err := a.backend.PrepareManagedInstallerSource(spec.Key, sourceRole, kernelPath, initrdPath, isoPath, extraModules, moduleSourceStrategy, initrdPreseedPath, initrdOverlayDir)
-			if err != nil {
-				return "", menuStay, err
-			}
-			fmt.Printf("Prepared managed installer source at %s.\n", path)
-			return path, menuStay, nil
 		case "b":
 			return "", menuBack, nil
 		case "e":
@@ -471,9 +205,10 @@ func (a *App) promptManagedInstallerSourceExtraModules(
 				state = "selected"
 			}
 			entries = append(entries, menuEntry{
-				Key:    strconv.Itoa(index + 1),
-				Label:  option.Name,
-				Detail: fmt.Sprintf("%s (%s)", option.Detail, state),
+				Key:      strconv.Itoa(index + 1),
+				Label:    option.Name,
+				Selected: selected[option.Name],
+				Detail:   fmt.Sprintf("%s (%s)", option.Detail, state),
 			})
 		}
 		entries = append(entries,
@@ -481,7 +216,7 @@ func (a *App) promptManagedInstallerSourceExtraModules(
 			menuEntry{Key: "b", Label: "Go Back"},
 			menuEntry{Key: "e", Label: "Exit"},
 		)
-		printMenu(entries...)
+		a.printMenu(entries...)
 		choice, err := a.promptChoice("Select an option")
 		if err != nil {
 			return nil, menuStay, err
@@ -543,7 +278,7 @@ func (a *App) promptManagedInstallerSourceStrategy(
 			infoRow{Label: "Use Host Kernel", Value: "Recommended. Use /lib/modules/<abi> on the host, or download matching binary kernel packages for that same ABI, then copy the required modules into initrd.gz."},
 			infoRow{Label: "Build UDEBs From Source", Value: "Slower fallback. Rebuild matching Debian installer kernel udebs from the Debian linux source package for the detected installer ABI."},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Use Host Kernel", Detail: "Fast path. Prefer the installed or downloaded matching binary kernel packages for the same ABI."},
 			menuEntry{Key: "2", Label: "Build UDEBs From Source", Detail: "Slow path. Use Debian kernel source and dpkg-buildpackage for the detected installer ABI."},
 			menuEntry{Key: "b", Label: "Go Back"},
@@ -630,98 +365,19 @@ func (a *App) promptInitrdOverlayContent(
 	return overlayDir, menuStay, nil
 }
 
-func (a *App) promptAndApplyLiveInitrdOverlay(
-	spec profileSpec,
-	sourcePath string,
-	inspection ISOInspection,
-) (string, ISOInspection, menuAction, error) {
-	overlayDir := ""
-	action := menuStay
-	var err error
-	if spec.Key == profileDebian && isLiveCapableMedia(inspection.MediaClass) {
-		if a.backend == nil || strings.TrimSpace(a.backend.initrdRoot) == "" {
-			return sourcePath, inspection, menuStay, fmt.Errorf("Debian Live requires the managed initrd overlay root")
-		}
-		overlayDir, err = resolveOptionalExistingDir(filepath.Join(a.backend.initrdRoot, "debian", "live"))
-		if err == nil && overlayDir == "" {
-			err = fmt.Errorf("required Debian Live initrd overlay is missing")
-		}
-		if err != nil {
-			return sourcePath, inspection, menuStay, err
-		}
-		printSection(
-			"Required Debian Live Initrd Content",
-			infoRow{Label: "Source", Value: overlayDir},
-			infoRow{Label: "Target", Value: "/ in every selected Debian Live initrd"},
-		)
-	} else {
-		overlayDir, action, err = a.promptInitrdOverlayContent(spec, multiOSSourceRolePrimary, inspection.MediaClass)
-		if err != nil || action != menuStay || overlayDir == "" {
-			return sourcePath, inspection, action, err
-		}
+// collectLiveInitrdOverlay records the overlay without opening or rebuilding an initrd.
+func (a *App) collectLiveInitrdOverlay(spec profileSpec, inspection ISOInspection) (string, menuAction, error) {
+	if spec.Key != profileDebian || !isLiveCapableMedia(inspection.MediaClass) {
+		return a.promptInitrdOverlayContent(spec, multiOSSourceRolePrimary, inspection.MediaClass)
 	}
-	remasteredPath, err := a.backend.RemasterLiveInitrdSource(spec.Key, sourcePath, overlayDir)
-	if err != nil {
-		return sourcePath, inspection, menuStay, err
+	if a.backend == nil || strings.TrimSpace(a.backend.initrdRoot) == "" {
+		return "", menuStay, fmt.Errorf("Debian Live requires the managed initrd overlay root")
 	}
-	remasteredInspection, err := a.backend.InspectSource(spec.Key, remasteredPath, multiOSSourceRolePrimary)
-	if err != nil {
-		return sourcePath, inspection, menuStay, err
+	path, err := resolveOptionalExistingDir(filepath.Join(a.backend.initrdRoot, "debian", "live"))
+	if err == nil && path == "" {
+		err = fmt.Errorf("required Debian Live initrd overlay is missing")
 	}
-	if err := validateManagedSourceSelection(spec, multiOSSourceRolePrimary, remasteredInspection, remasteredPath); err != nil {
-		return sourcePath, inspection, menuStay, err
-	}
-	fmt.Printf("Prepared Live initrd overlay source at %s.\n", remasteredPath)
-	return remasteredPath, remasteredInspection, menuStay, nil
-}
-
-func managedInstallerSourceRepoPreseedFilename(profile string, sourceRole string) string {
-	if sourceRole != multiOSSourceRoleNetinst && sourceRole != multiOSSourceRoleNetboot {
-		return ""
-	}
-	switch profile {
-	case profileDebian:
-		return "preseed-debian.cfg"
-	case profileKaliLinux:
-		return "preseed-kali.cfg"
-	default:
-		return ""
-	}
-}
-
-func (a *App) promptManagedInstallerSourceInitrdPreseed(
-	spec profileSpec,
-	sourceRole string,
-) (string, menuAction, error) {
-	preseedFilename := managedInstallerSourceRepoPreseedFilename(spec.Key, sourceRole)
-	if preseedFilename == "" {
-		return "", menuStay, nil
-	}
-	preseedRoot := strings.TrimSpace(a.backend.preseedRoot)
-	if preseedRoot == "" {
-		preseedRoot = filepath.Join("configs", "preseed")
-	}
-	resolvedPreseedPath, err := resolveOptionalExistingFile(filepath.Join(preseedRoot, preseedFilename))
-	if err != nil {
-		return "", menuStay, err
-	}
-	includePreseed, err := a.promptYesNo(
-		fmt.Sprintf("Embed %s as /preseed.cfg in the %s %s initrd", filepath.Base(resolvedPreseedPath), spec.MultiOSLabel, sourceRole),
-		false,
-	)
-	if err != nil {
-		return "", menuStay, err
-	}
-	if !includePreseed {
-		return "", menuStay, nil
-	}
-	printSection(
-		"Embedded Initrd Preseed",
-		infoRow{Label: "Source", Value: resolvedPreseedPath},
-		infoRow{Label: "Target", Value: "/preseed.cfg in the rebuilt installer initrd"},
-		infoRow{Label: "Behavior", Value: "Kernel command-line answers can still override matching values from the embedded repo preseed file."},
-	)
-	return resolvedPreseedPath, menuStay, nil
+	return path, menuStay, err
 }
 
 func (a *App) printManagedInstallerSourcePreparation(
@@ -897,7 +553,7 @@ func (a *App) chooseSecureBootTrustMode() (string, menuAction, error) {
 			infoRow{Label: "MOK on USB", Value: "Reuse the persistent MOK store, enroll EFI/debian-usb/mok/MOK.der once from the USB menu, then boot managed entries."},
 			infoRow{Label: "Firmware db", Value: "Sign for the firmware Secure Boot db workflow and import secureboot/db.cer or combined secureboot/db.esl through firmware key management or UEFI UpdateVars."},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "MOK Enrollment on USB", Detail: "Recommended when you want to trust this USB via MOK.der."},
 			menuEntry{Key: "2", Label: "Firmware db import", Detail: "Use firmware custom key enrollment instead of MokManager."},
 			menuEntry{Key: "b", Label: "Go Back"},
@@ -927,57 +583,19 @@ func (a *App) promptPersistenceSettings(label string, spec profileSpec, sourcePa
 		return false, persistenceModeNone, 0, sourcePath, inspection, nil
 	}
 	enabled, err := a.promptYesNo("Create a persistence partition for "+label, false)
-	if err != nil {
+	if err != nil || !enabled {
 		return false, persistenceModeNone, 0, sourcePath, inspection, err
 	}
-	if !enabled {
-		return false, persistenceModeNone, 0, sourcePath, inspection, nil
-	}
 	mode := persistenceModePlain
-	updatedSourcePath := sourcePath
-	updatedInspection := inspection
-	if inspection.SupportsEncryptedPersistence {
+	if inspection.SupportsEncryptedPersistence || remasterEncryptedPersistenceEligible(spec, sourceRole, inspection) {
 		var cancelled bool
 		mode, cancelled, err = a.choosePersistenceModeForProfile(spec.Key)
-		if err != nil {
+		if err != nil || cancelled {
 			return false, persistenceModeNone, 0, sourcePath, inspection, err
-		}
-		if cancelled {
-			fmt.Println("Persistence disabled.")
-			return false, persistenceModeNone, 0, sourcePath, inspection, nil
-		}
-	} else if remasterEncryptedPersistenceEligible(spec, sourceRole, inspection) {
-		remaster, err := a.promptYesNo("Encrypted persistence is unavailable in this source. Remaster the live source now to add cryptsetup/LUKS2 support", false)
-		if err != nil {
-			return false, persistenceModeNone, 0, sourcePath, inspection, err
-		}
-		if remaster {
-			updatedSourcePath, updatedInspection, err = a.remasterEncryptedPersistenceSource(spec, sourcePath, sourceRole)
-			if err != nil {
-				return false, persistenceModeNone, 0, sourcePath, inspection, err
-			}
-			var cancelled bool
-			mode, cancelled, err = a.choosePersistenceModeForProfile(spec.Key)
-			if err != nil {
-				return false, persistenceModeNone, 0, updatedSourcePath, updatedInspection, err
-			}
-			if cancelled {
-				fmt.Println("Persistence disabled.")
-				return false, persistenceModeNone, 0, updatedSourcePath, updatedInspection, nil
-			}
-		} else if spec.Key == profileTails {
-			fmt.Println("Tails Persistent Storage is encrypted only.")
-			return false, persistenceModeNone, 0, sourcePath, inspection, nil
 		}
 	}
 	size, err := a.promptPositiveInt(label+" persistence size in GiB", a.config.DefaultPersistenceSizeGiB)
-	if err != nil {
-		return false, persistenceModeNone, 0, updatedSourcePath, updatedInspection, err
-	}
-	if mode == persistenceModeEncrypted {
-		fmt.Println("Encrypted persistence passphrase will be requested during USB creation.")
-	}
-	return true, mode, size, updatedSourcePath, updatedInspection, nil
+	return true, mode, size, sourcePath, inspection, err
 }
 
 func remasterEncryptedPersistenceEligible(spec profileSpec, sourceRole string, inspection ISOInspection) bool {
@@ -990,22 +608,6 @@ func remasterEncryptedPersistenceEligible(spec profileSpec, sourceRole string, i
 	default:
 		return false
 	}
-}
-
-func (a *App) remasterEncryptedPersistenceSource(spec profileSpec, sourcePath, sourceRole string) (string, ISOInspection, error) {
-	remasteredPath, err := a.backend.RemasterLivePersistenceSource(spec.Key, sourcePath)
-	if err != nil {
-		return "", ISOInspection{}, err
-	}
-	inspection, err := a.backend.InspectSource(spec.Key, remasteredPath, sourceRole)
-	if err != nil {
-		return "", ISOInspection{}, err
-	}
-	if !inspection.SupportsEncryptedPersistence {
-		return "", ISOInspection{}, fmt.Errorf("remastered source still does not support encrypted persistence: %s", remasteredPath)
-	}
-	fmt.Printf("Remastered live source with cryptsetup/LUKS2 support at %s.\n", remasteredPath)
-	return remasteredPath, inspection, nil
 }
 
 func normalizePathInput(value string) string {
@@ -1050,7 +652,7 @@ func (a *App) chooseWriteMode(spec profileSpec, inspection ISOInspection, source
 			entries = append(entries, menuEntry{Key: "2", Label: "Build Managed USB", Detail: managedDetail})
 		}
 		entries = append(entries, menuEntry{Key: "b", Label: "Go Back"}, menuEntry{Key: "e", Label: "Exit"})
-		printMenu(entries...)
+		a.printMenu(entries...)
 		choice, err := a.promptChoice("Select the write mode")
 		if err != nil {
 			return "", menuStay, err
@@ -1089,7 +691,7 @@ func (a *App) choosePersistenceModeForProfile(profile string) (string, bool, err
 				"Modes",
 				infoRow{Label: "Encrypted", Value: "Tails Persistent Storage uses an encrypted LUKS container"},
 			)
-			printMenu(
+			a.printMenu(
 				menuEntry{Key: "1", Label: "Encrypted (LUKS)"},
 				menuEntry{Key: "b", Label: "Back Without Persistence"},
 			)
@@ -1114,7 +716,7 @@ func (a *App) choosePersistenceModeForProfile(profile string) (string, bool, err
 			infoRow{Label: "Standard", Value: "ext4 persistence partition"},
 			infoRow{Label: "Encrypted", Value: "LUKS container with ext4 persistence"},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Standard"},
 			menuEntry{Key: "2", Label: "Encrypted (LUKS)"},
 			menuEntry{Key: "b", Label: "Back Without Persistence"},
@@ -1152,7 +754,7 @@ func (a *App) chooseDevice() (Device, menuAction, error) {
 			infoRow{Label: "Eligible devices", Value: fmt.Sprintf("%d removable or external disk(s)", len(candidates))},
 			infoRow{Label: "Filter", Value: "The current system disk and fixed internal disks are excluded automatically."},
 		)
-		printMenu(deviceMenuEntries(candidates)...)
+		a.printMenu(deviceMenuEntries(candidates)...)
 		choice, err := a.promptChoice("Select the target device")
 		if err != nil {
 			return Device{}, menuStay, err
@@ -1186,7 +788,7 @@ func eligibleDevices(devices []Device) []Device {
 
 func (a *App) printPlanSummary(plan CreatePlan, device Device, spec profileSpec, savedPlanID string, planState string) {
 	printStepHeader(4, 4, "Review Plan")
-	printSection("Technical Specs", singleTechnicalSpecRows(plan, device, spec, savedPlanID, planState)...)
+	printSingleReview(plan, device, savedPlanID, planState, false)
 }
 
 func (a *App) printDetectedISOs() {

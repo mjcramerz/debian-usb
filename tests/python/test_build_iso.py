@@ -422,8 +422,12 @@ class BuildISOTests(unittest.TestCase):
                 policy_root = build_root / "config" / include_name
                 for unit in ("fwupd-refresh.service", "fwupd-refresh.timer"):
                     mask_path = policy_root / "etc" / "systemd" / "system" / unit
-                    self.assertTrue(mask_path.is_symlink())
-                    self.assertEqual(mask_path.readlink(), Path("/dev/null"))
+                    if include_name == "includes.chroot":
+                        self.assertFalse(mask_path.is_symlink())
+                        self.assertFalse(mask_path.exists())
+                    else:
+                        self.assertTrue(mask_path.is_symlink())
+                        self.assertEqual(mask_path.readlink(), Path("/dev/null"))
                 self.assertIn(
                     "en_US.UTF-8 UTF-8",
                     (policy_root / "etc" / "locale.gen").read_text(encoding="utf-8").splitlines(),

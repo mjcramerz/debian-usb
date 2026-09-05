@@ -1,0 +1,14 @@
+write_usb.sh: Removing stale root-level installation-media path from the shared ISO store: /.disk
+write_usb.sh: Removing stale root-level installation-media path from the shared ISO store: /live
+write_usb.sh: Removing stale root-level installation-media path from the shared ISO store: /casper
+write_usb.sh: Removing stale root-level installation-media path from the shared ISO store: /install
+write_usb.sh: Removing stale root-level installation-media path from the shared ISO store: /install.amd
+write_usb.sh: Removing stale root-level installation-media path from the shared ISO store: /d-i
+write_usb.sh: Removing stale root-level installation-media path from the shared ISO store: /debian-installer
+write_usb.sh: Staging ISO payload /tmp/tmp.ZExQOkbLj6/prepared-netinst/payload/debian-netinst.iso -> /debian-netinst/debian-netinst.iso
+write_usb.sh: Staging boot asset /tmp/tmp.ZExQOkbLj6/prepared-netinst/hd-media/vmlinuz -> /debian-netinst/vmlinuz
+write_usb.sh: Staging boot asset /tmp/tmp.ZExQOkbLj6/prepared-netinst/hd-media/initrd.gz -> /debian-netinst/initrd.gz
+write_usb.sh: Remastering debian Live payload with the repo-managed recovery and administration tool profile
+write_usb.sh: Embedding live config hooks into raw ISO payload under /live/config-hooks
+write_usb.sh: Embedding live config hooks into raw ISO payload under /live/config-hooks
+write_usb.sh: Embedding managed UEFI menu redirect into raw ISO payload /tmp/tmp.ZExQOkbLj6/debian-live.iso

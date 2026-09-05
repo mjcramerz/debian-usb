@@ -1,0 +1,85 @@
+.....EEE
+======================================================================
+ERROR: test_package_owned_live_tools_merged_usr (test_initramfs_deferral.InitramfsDeferralTests.test_package_owned_live_tools_merged_usr)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/work/debian-usb-ref/tests/python/test_initramfs_deferral.py", line 93, in test_package_owned_live_tools_merged_usr
+    self._exercise(True, False, merged_usr=True, owned=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/data/work/debian-usb-ref/tests/python/test_initramfs_deferral.py", line 51, in _exercise
+    with _deferred_initramfs_updates(root, io.StringIO()):
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/contextlib.py", line 148, in __exit__
+    next(self.gen)
+    ~~~~^^^^^^^^^^
+  File "/mnt/data/work/debian-usb-ref/src/python/debian_usb/rebuild_iso.py", line 2842, in _deferred_initramfs_updates
+    with _live_tools_initramfs_diversion(live_root, log_file) as source:
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/contextlib.py", line 148, in __exit__
+    next(self.gen)
+    ~~~~^^^^^^^^^^
+  File "/mnt/data/work/debian-usb-ref/src/python/debian_usb/rebuild_iso.py", line 2830, in _live_tools_initramfs_diversion
+    raise RuntimeError("update-initramfs wrapper changed during package installation")
+RuntimeError: update-initramfs wrapper changed during package installation
+
+======================================================================
+ERROR: test_package_owned_live_tools_wrapper_failure (test_initramfs_deferral.InitramfsDeferralTests.test_package_owned_live_tools_wrapper_failure)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/work/debian-usb-ref/src/python/debian_usb/rebuild_iso.py", line 2821, in _live_tools_initramfs_diversion
+    yield source
+  File "/mnt/data/work/debian-usb-ref/src/python/debian_usb/rebuild_iso.py", line 2854, in _deferred_initramfs_updates
+    yield
+  File "/mnt/data/work/debian-usb-ref/tests/python/test_initramfs_deferral.py", line 58, in _exercise
+    raise ValueError("apt fixture failure")
+ValueError: apt fixture failure
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/mnt/data/work/debian-usb-ref/tests/python/test_initramfs_deferral.py", line 90, in test_package_owned_live_tools_wrapper_failure
+    self._exercise(True, True, owned=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/data/work/debian-usb-ref/tests/python/test_initramfs_deferral.py", line 51, in _exercise
+    with _deferred_initramfs_updates(root, io.StringIO()):
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "/mnt/data/work/debian-usb-ref/src/python/debian_usb/rebuild_iso.py", line 2842, in _deferred_initramfs_updates
+    with _live_tools_initramfs_diversion(live_root, log_file) as source:
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "/mnt/data/work/debian-usb-ref/src/python/debian_usb/rebuild_iso.py", line 2830, in _live_tools_initramfs_diversion
+    raise RuntimeError("update-initramfs wrapper changed during package installation")
+RuntimeError: update-initramfs wrapper changed during package installation
+
+======================================================================
+ERROR: test_package_owned_live_tools_wrapper_success (test_initramfs_deferral.InitramfsDeferralTests.test_package_owned_live_tools_wrapper_success)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/work/debian-usb-ref/tests/python/test_initramfs_deferral.py", line 87, in test_package_owned_live_tools_wrapper_success
+    self._exercise(True, False, owned=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/data/work/debian-usb-ref/tests/python/test_initramfs_deferral.py", line 51, in _exercise
+    with _deferred_initramfs_updates(root, io.StringIO()):
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/contextlib.py", line 148, in __exit__
+    next(self.gen)
+    ~~~~^^^^^^^^^^
+  File "/mnt/data/work/debian-usb-ref/src/python/debian_usb/rebuild_iso.py", line 2842, in _deferred_initramfs_updates
+    with _live_tools_initramfs_diversion(live_root, log_file) as source:
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/contextlib.py", line 148, in __exit__
+    next(self.gen)
+    ~~~~^^^^^^^^^^
+  File "/mnt/data/work/debian-usb-ref/src/python/debian_usb/rebuild_iso.py", line 2830, in _live_tools_initramfs_diversion
+    raise RuntimeError("update-initramfs wrapper changed during package installation")
+RuntimeError: update-initramfs wrapper changed during package installation
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.064s
+
+FAILED (errors=3)

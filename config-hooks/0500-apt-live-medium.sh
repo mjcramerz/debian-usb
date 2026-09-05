@@ -116,7 +116,7 @@ lap_filter_legacy_source_file() (
     function local_live_uri(uri, normalized) {
       normalized = tolower(uri)
       return normalized ~ /^cdrom:/ ||
-        normalized ~ /^file:\/+(run\/live\/medium|lib\/live\/mount\/medium|cdrom)(\/|$)/
+        normalized ~ /^file:\/+(run\/live\/medium|lib\/live\/mount\/medium|run\/debian-usb\/apt-medium|cdrom)(\/|$)/
     }
     function normalized_option(option) {
       option = tolower(option)
@@ -195,7 +195,7 @@ lap_filter_deb822_source_file() (
     function local_live_uri(uri, normalized) {
       normalized = tolower(uri)
       return normalized ~ /^cdrom:/ ||
-        normalized ~ /^file:\/+(run\/live\/medium|lib\/live\/mount\/medium|cdrom)(\/|$)/
+        normalized ~ /^file:\/+(run\/live\/medium|lib\/live\/mount\/medium|run\/debian-usb\/apt-medium|cdrom)(\/|$)/
     }
     function append_line(buffer, line) {
       return buffer (buffer == "" ? "" : "\n") line
@@ -413,13 +413,33 @@ lap_write_official_source() (
   temp_file=$(mktemp "${parts_dir}/.debian-usb-live.sources.XXXXXX")
   umask "${old_umask}"
   trap 'rm -f -- "${temp_file}"' 0 INT TERM
+  components="main contrib non-free non-free-firmware"
+  [ "${suite}" != bullseye ] || components="main contrib non-free"
   cat >"${temp_file}" <<EOF_SOURCES
 Types: deb
 URIs: https://deb.debian.org/debian
 Suites: ${suite}
-Components: main contrib non-free non-free-firmware
+Components: ${components}
 Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
 EOF_SOURCES
+  case ${suite} in
+    bullseye|bookworm|trixie)
+      cat >>"${temp_file}" <<EOF_UPDATES
+
+Types: deb
+URIs: https://deb.debian.org/debian
+Suites: ${suite}-updates
+Components: ${components}
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: https://security.debian.org/debian-security
+Suites: ${suite}-security
+Components: ${components}
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+EOF_UPDATES
+      ;;
+  esac
   chmod 0644 "${temp_file}"
   mv -f -- "${temp_file}" "${source_file}"
   trap - 0 INT TERM
@@ -445,15 +465,37 @@ lap_main() (
   mkdir -p -- "${parts_dir}"
   chmod 0755 "${apt_root}" "${parts_dir}"
   lap_filter_local_sources "${apt_root}"
+  # The helper is inside squashfs, not dependent on live-config.hooks=medium.
+  # It advertises a local repo only with Release + real indexes + every .deb.
+  repository_helper=$(lap_root_path "${root}" /usr/lib/debian-usb/live-apt-repository)
+  if [ -x "${repository_helper}" ]; then
+    "${repository_helper}" --root "${root}" --suite "${suite}" || {
+      rm -f -- "${parts_dir}/debian-usb-medium.sources"
+      lap_warn "offline ISO repository validation failed; network sources remain enabled"
+    }
+  else
+    rm -f -- "${parts_dir}/debian-usb-medium.sources"
+  fi
   if lap_has_network_source "${apt_root}"; then
-    lap_log "removed active Live-medium/CD-ROM sources and preserved network sources"
+    lap_log "validated Live-medium sources and preserved network sources"
   else
     lap_write_official_source "${apt_root}" "${suite}"
-    lap_log "removed active Live-medium/CD-ROM sources and added Debian upstream suite ${suite}"
+    lap_log "validated Live-medium sources and added Debian upstream suite ${suite}"
   fi
 )
 
 if [ "${DEBIAN_USB_HOOK_SOURCE_ONLY:-0}" != 1 ]; then
+  # The live root may later be installed to disk; never alter installed APT.
+  case " $(cat /proc/cmdline 2>/dev/null) " in
+    *" boot=live "*) ;;
+    *) exit 0 ;;
+  esac
+  # Serialize live-config, systemd and APT pre-invoke callers.
+  if command -v flock >/dev/null 2>&1; then
+    mkdir -p /run/lock
+    exec 9>/run/lock/debian-usb-live-apt.lock
+    flock -w 90 9 || exit 0
+  fi
   lap_main / || lap_warn "could not configure Debian Live APT sources"
   exit 0
 fi

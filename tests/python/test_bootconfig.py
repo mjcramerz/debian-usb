@@ -101,6 +101,15 @@ class BootConfigTests(unittest.TestCase):
         self.assertNotIn("toram", tokens)
         self.assertNotIn("toram=old.squashfs", tokens)
 
+    def test_explicit_no_ram_overrides_source_and_config_toram(self) -> None:
+        config_data = dict(load_template_config())
+        config_data["DEFAULT_LIVE_TORAM"] = "1"
+        config_data["DEFAULT_LIVE_KERNEL_EXTRAS"] = "toram toram=old.squashfs quiet"
+        args = _apply_live_settings("boot=live toram ---", config_data, "debian", live_toram=False)
+        self.assertFalse(any(token == "toram" or token.startswith("toram=")
+                             for token in _pre_separator_tokens(args)))
+        self.assertIn("quiet", args)
+
     def test_installer_settings_remove_live_only_toram_arguments(self) -> None:
         config_data = dict(load_template_config())
 

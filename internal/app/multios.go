@@ -27,6 +27,7 @@ func (a *App) handleCreateMultiOS() (menuAction, error) {
 	if action != menuStay {
 		return action, nil
 	}
+	plan.TargetDevice = &device
 	savedExecution, created, err := a.backend.SaveOrReusePlannedExecution(newMultiOSPlannedExecution(plan, device.Path))
 	if err != nil {
 		return menuStay, err
@@ -135,9 +136,10 @@ func (a *App) chooseMultiOSSources() ([]multiOSSourceSelection, menuAction, erro
 				state = "selected"
 			}
 			entries = append(entries, menuEntry{
-				Key:    strconv.Itoa(index + 1),
-				Label:  option.Label,
-				Detail: fmt.Sprintf("%s (%s)", option.Detail, state),
+				Key:      strconv.Itoa(index + 1),
+				Label:    option.Label,
+				Selected: selected[multiOSSourceSelectionKey(option.Profile, option.SourceRole)],
+				Detail:   fmt.Sprintf("%s (%s)", option.Detail, state),
 			})
 		}
 		continueKey := strconv.Itoa(len(multiOSSourceOptions) + 1)
@@ -146,7 +148,7 @@ func (a *App) chooseMultiOSSources() ([]multiOSSourceSelection, menuAction, erro
 			menuEntry{Key: "b", Label: "Go Back"},
 			menuEntry{Key: "e", Label: "Exit"},
 		)
-		printMenu(entries...)
+		a.printMenu(entries...)
 		choice, err := a.promptChoice("Select an option")
 		if err != nil {
 			return nil, menuStay, err
@@ -200,16 +202,17 @@ func (a *App) collectMultiOSItem(spec profileSpec, index int, total int, sourceR
 	printStepHeader(index, total, sourceTitle)
 	a.printDetectedISOs()
 	printSection("Source", infoRow{Label: "Order", Value: strings.Join(flow, " | ")})
-	isoPath, action, err := a.resolveCreateSourcePath(spec, sourceRole)
+	preparation, action, err := a.collectSourceSelection(spec, sourceRole)
 	if err != nil {
 		return item, menuStay, err
 	}
 	if action != menuStay {
 		return item, action, nil
 	}
-	item.ISOPath = isoPath
+	item.Preparation = preparation
+	item.ISOPath = preparation.ISO.Path
 
-	inspection, err := a.backend.InspectSource(spec.Key, item.ISOPath, sourceRole)
+	inspection, err := a.inspectSelectedSource(spec, sourceRole, preparation)
 	if err != nil {
 		return item, menuStay, err
 	}
@@ -217,14 +220,11 @@ func (a *App) collectMultiOSItem(spec profileSpec, index int, total int, sourceR
 		return item, menuStay, err
 	}
 	if sourceRole == multiOSSourceRolePrimary && isLiveCapableMedia(inspection.MediaClass) {
-		var liveInitrdAction menuAction
-		item.ISOPath, inspection, liveInitrdAction, err = a.promptAndApplyLiveInitrdOverlay(spec, item.ISOPath, inspection)
-		if err != nil {
-			return item, menuStay, err
+		overlay, action, err := a.collectLiveInitrdOverlay(spec, inspection)
+		if err != nil || action != menuStay {
+			return item, action, err
 		}
-		if liveInitrdAction != menuStay {
-			return item, liveInitrdAction, nil
-		}
+		item.Preparation.InitrdOverlayDir = overlay
 	}
 	item.Inspection = inspection
 	printSection("Inspection", inspectionSummaryRows(spec, inspection)...)
@@ -336,7 +336,7 @@ func buildMultiOSPlan(config RuntimeConfig, request MultiOSRequest) (MultiOSPlan
 		if !spec.SupportsManaged {
 			return MultiOSPlan{}, fmt.Errorf("%s does not support managed mode", spec.MenuLabel)
 		}
-		isoPath, err := validateManagedSourcePath(item.ISOPath, sourceRole)
+		isoPath, err := validatePlannedSourcePath(item.ISOPath, sourceRole, item.Preparation)
 		if err != nil {
 			return MultiOSPlan{}, err
 		}
@@ -408,7 +408,7 @@ func buildMultiOSPlan(config RuntimeConfig, request MultiOSRequest) (MultiOSPlan
 		if item.Persistence && !inspection.SupportsPersistence {
 			return MultiOSPlan{}, fmt.Errorf("selected ISO does not support persistence for %s: %s", spec.MultiOSLabel, isoPath)
 		}
-		if persistenceMode == persistenceModeEncrypted && !inspection.SupportsEncryptedPersistence {
+		if persistenceMode == persistenceModeEncrypted && !inspection.SupportsEncryptedPersistence && !remasterEncryptedPersistenceEligible(spec, sourceRole, inspection) {
 			return MultiOSPlan{}, fmt.Errorf("encrypted persistence is not supported for %s: %s", spec.MultiOSLabel, isoPath)
 		}
 		if item.Persistence && item.PersistenceSizeGiB <= 0 {
@@ -455,13 +455,14 @@ func buildMultiOSPlan(config RuntimeConfig, request MultiOSRequest) (MultiOSPlan
 			menuLabel = spec.DefaultLiveMenuLabel
 		}
 		plan.Items = append(plan.Items, MultiOSPlanItem{
-			ID:         fmt.Sprintf("os%d", index+1),
-			Profile:    item.Profile,
-			SourceRole: sourceRole,
-			Title:      title,
-			ISOPath:    isoPath,
-			MediaClass: inspection.MediaClass,
-			Firmware:   append([]string{}, inspection.Firmware...),
+			Preparation: cloneSourcePreparation(item.Preparation),
+			ID:          fmt.Sprintf("os%d", index+1),
+			Profile:     item.Profile,
+			SourceRole:  sourceRole,
+			Title:       title,
+			ISOPath:     isoPath,
+			MediaClass:  inspection.MediaClass,
+			Firmware:    append([]string{}, inspection.Firmware...),
 			ManagedPayloadLayout: blankIfEmpty(
 				effectiveLayout,
 				"iso-store",
@@ -724,5 +725,5 @@ func normalizeMultiOSKernelArgs(spec profileSpec, kernelArgs, persistenceMode, p
 
 func (a *App) printMultiOSPlanSummary(plan MultiOSPlan, device Device, savedPlanID string, planState string) {
 	printStepHeader(4, 4, "Review Multi-OS Plan")
-	printSection("Technical Specs", multiOSTechnicalSpecRows(plan, device, savedPlanID, planState)...)
+	printMultiReview(plan, device, savedPlanID, planState, false)
 }

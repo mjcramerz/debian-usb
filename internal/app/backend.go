@@ -437,41 +437,7 @@ func (b *Backend) RemasterLivePersistenceSource(profile, sourceISOPath string) (
 }
 
 func (b *Backend) remasterLiveToolsSource(profile, sourceISOPath string, groups []string, requireSudo bool) (string, error) {
-	var payload struct {
-		ISOPath string `json:"iso_path"`
-	}
-	args := []string{
-		"remaster-live-tools-source",
-		"--profile", profile,
-		"--source-iso", sourceISOPath,
-	}
-	for _, group := range groups {
-		if strings.TrimSpace(group) == "" {
-			return "", fmt.Errorf("Live administration tool group must not be empty")
-		}
-		args = append(args, "--group", group)
-	}
-	if groups != nil && len(groups) == 0 {
-		args = append(args, "--no-tools")
-	}
-	if profile == profileDebian {
-		args = append(args, "--live-kernel-args", mandatoryDebianLiveHookKernelArgs)
-	}
-	if err := b.runJSON(requireSudo, &payload, args...); err != nil {
-		return "", err
-	}
-	preparedPath, err := filepath.Abs(normalizePathInput(payload.ISOPath))
-	if err != nil {
-		return "", fmt.Errorf("resolve remastered Live ISO path: %w", err)
-	}
-	info, err := os.Stat(preparedPath)
-	if err != nil {
-		return "", fmt.Errorf("stat remastered Live ISO: %w", err)
-	}
-	if !info.Mode().IsRegular() || info.Size() <= 0 || !strings.EqualFold(filepath.Ext(preparedPath), ".iso") {
-		return "", fmt.Errorf("remaster-live-tools-source returned an invalid ISO path: %s", preparedPath)
-	}
-	return preparedPath, nil
+	return b.remasterLiveSource(profile, sourceISOPath, groups, "", false, requireSudo)
 }
 
 func liveSourceNeedsRemaster(profile string, groups []string) bool {
@@ -498,23 +464,18 @@ func (b *Backend) UpdateCreate(plan CreatePlan, devicePath string, persistenceSi
 }
 
 func (b *Backend) executeCreate(plan CreatePlan, devicePath string, persistenceSizeGiB int, requireSudo bool, extraArgs ...string) error {
+	if err := b.verifyTargetDevice(plan.TargetDevice, devicePath); err != nil {
+		return err
+	}
 	sourceRole := blankIfEmpty(plan.SourceRole, multiOSSourceRolePrimary)
-	remasterEligible := sourceRole == multiOSSourceRolePrimary && isLiveCapableMedia(plan.MediaClass)
-	if len(plan.LiveToolGroups) > 0 && !remasterEligible {
-		return fmt.Errorf("Live administration tool groups require a primary Live or Hybrid source")
+	path, err := b.prepareSelectedSource(plan.Profile, sourceRole, plan.ISOPath, plan.MediaClass,
+		plan.WriteMode, plan.Preparation, plan.LiveToolGroups, plan.PersistenceMode == persistenceModeEncrypted, requireSudo)
+	if err != nil {
+		return err
 	}
-	if len(plan.LiveToolGroups) > 0 && !liveSourceSupportsToolRemaster(plan.Profile) {
-		return fmt.Errorf("Live administration tool selection is not supported for profile: %s", plan.Profile)
-	}
-	if remasterEligible && liveSourceNeedsRemaster(plan.Profile, plan.LiveToolGroups) {
-		if !liveSourceSupportsToolRemaster(plan.Profile) {
-			return fmt.Errorf("Live administration tool selection is not supported for profile: %s", plan.Profile)
-		}
-		preparedISOPath, err := b.remasterLiveToolsSource(plan.Profile, plan.ISOPath, plan.LiveToolGroups, requireSudo)
-		if err != nil {
-			return err
-		}
-		plan.ISOPath = preparedISOPath
+	plan.ISOPath = path
+	if err := b.verifyTargetDevice(plan.TargetDevice, devicePath); err != nil {
+		return err
 	}
 	args := []string{
 		"--config", b.configPath,
@@ -589,29 +550,33 @@ func (b *Backend) UpdateMultiOSCreate(plan MultiOSPlan, devicePath string) error
 }
 
 func (b *Backend) executeMultiOSCreate(plan MultiOSPlan, devicePath string, requireSudo bool, extraArgs ...string) error {
+	if err := b.verifyTargetDevice(plan.TargetDevice, devicePath); err != nil {
+		return err
+	}
+	// Validate every selected input before preparing even the first item.
+	for _, item := range plan.Items {
+		if err := item.Preparation.validate(blankIfEmpty(item.SourceRole, multiOSSourceRolePrimary)); err != nil {
+			return fmt.Errorf("%s: %w", item.Title, err)
+		}
+	}
 	executionPlan := plan
 	executionPlan.Items = append([]MultiOSPlanItem(nil), plan.Items...)
 	for index := range executionPlan.Items {
 		item := &executionPlan.Items[index]
-		sourceRole := blankIfEmpty(item.SourceRole, multiOSSourceRolePrimary)
-		remasterEligible := sourceRole == multiOSSourceRolePrimary && isLiveCapableMedia(item.MediaClass)
-		if len(item.LiveToolGroups) > 0 && !remasterEligible {
-			return fmt.Errorf("Live administration tool groups require a primary Live or Hybrid source for %s", item.Title)
-		}
-		if len(item.LiveToolGroups) > 0 && !liveSourceSupportsToolRemaster(item.Profile) {
-			return fmt.Errorf("Live administration tool selection is not supported for profile: %s", item.Profile)
-		}
-		if !remasterEligible || !liveSourceNeedsRemaster(item.Profile, item.LiveToolGroups) {
-			continue
-		}
-		if !liveSourceSupportsToolRemaster(item.Profile) {
-			return fmt.Errorf("Live administration tool selection is not supported for profile: %s", item.Profile)
-		}
-		preparedISOPath, err := b.remasterLiveToolsSource(item.Profile, item.ISOPath, item.LiveToolGroups, requireSudo)
+		role := blankIfEmpty(item.SourceRole, multiOSSourceRolePrimary)
+		path, err := b.prepareSelectedSource(item.Profile, role, item.ISOPath, item.MediaClass,
+			writeModeMultiOS, item.Preparation, item.LiveToolGroups, item.PersistenceMode == persistenceModeEncrypted, requireSudo)
 		if err != nil {
-			return err
+			return fmt.Errorf("%s: %w", item.Title, err)
 		}
-		item.ISOPath = preparedISOPath
+		item.ISOPath = path
+		// The ISO basename may have changed in the remaster. Keep GRUB's exact
+		// findiso locator synchronized with the file actually staged by writer.
+		item.PayloadISOName = plannedPayloadISOName(path, role)
+		item.Preparation = nil
+	}
+	if err := b.verifyTargetDevice(plan.TargetDevice, devicePath); err != nil {
+		return err
 	}
 	tempFile, err := os.CreateTemp("", "debian-usb-multios-*.json")
 	if err != nil {

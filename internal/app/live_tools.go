@@ -267,7 +267,7 @@ func (a *App) promptLiveToolGroups(profile string, current []string) ([]string, 
 			infoRow{Label: "Current selection", Value: currentLabel},
 			infoRow{Label: "Scope", Value: "Installed only into the Live root filesystem; Netinst and Netboot are unchanged"},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "s", Label: "Select Tools", Detail: "Choose individual Live tool groups"},
 			menuEntry{Key: "n", Label: "None", Detail: "Add no optional Live administration tools"},
 			menuEntry{Key: "a", Label: "All", Detail: "Include every Live tool group"},
@@ -340,9 +340,10 @@ func (a *App) promptSpecificLiveToolGroups(catalog liveToolCatalog, current []st
 				state = "selected"
 			}
 			entries = append(entries, menuEntry{
-				Key:    strconv.Itoa(index + 1),
-				Label:  group.Title,
-				Detail: fmt.Sprintf("%s (%d packages; %s)", group.Description, len(group.Packages), state),
+				Key:      strconv.Itoa(index + 1),
+				Label:    group.Title,
+				Selected: selected[group.ID],
+				Detail:   fmt.Sprintf("%s (%d packages; %s)", group.Description, len(group.Packages), state),
 			})
 		}
 		entries = append(entries,
@@ -350,7 +351,7 @@ func (a *App) promptSpecificLiveToolGroups(catalog liveToolCatalog, current []st
 			menuEntry{Key: "b", Label: "Go Back", Detail: "Return to Select Tools, None, or All"},
 			menuEntry{Key: "e", Label: "Exit"},
 		)
-		printMenu(entries...)
+		a.printMenu(entries...)
 		choice, err := a.promptChoice("Select an individual Live tool option")
 		if err != nil {
 			return nil, menuStay, err

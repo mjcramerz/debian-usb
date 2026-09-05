@@ -116,26 +116,9 @@ func buildCreatePlan(config RuntimeConfig, req CreateRequest) (CreatePlan, error
 	}
 	req.OfflinePreseedSourceDir = offlinePreseedSourceDir
 
-	isoPath, err := filepath.Abs(normalizePathInput(req.ISOPath))
+	isoPath, err := validatePlannedSourcePath(req.ISOPath, req.SourceRole, req.Preparation)
 	if err != nil {
 		return CreatePlan{}, err
-	}
-	info, err := os.Stat(isoPath)
-	if err != nil {
-		return CreatePlan{}, fmt.Errorf("ISO path does not exist: %s", isoPath)
-	}
-	if req.SourceRole == multiOSSourceRolePrimary {
-		if !info.Mode().IsRegular() {
-			return CreatePlan{}, fmt.Errorf("ISO path is not a regular file: %s", isoPath)
-		}
-		if info.Size() <= 0 {
-			return CreatePlan{}, fmt.Errorf("ISO file is empty: %s", isoPath)
-		}
-		if strings.ToLower(filepath.Ext(isoPath)) != ".iso" {
-			return CreatePlan{}, fmt.Errorf("expected an .iso file: %s", isoPath)
-		}
-	} else if !info.IsDir() {
-		return CreatePlan{}, fmt.Errorf("%s source must be a prepared source directory: %s", multiOSSourceRoleSummary(req.SourceRole), isoPath)
 	}
 
 	inspection := req.Inspection
@@ -184,12 +167,12 @@ func buildCreatePlan(config RuntimeConfig, req CreateRequest) (CreatePlan, error
 	if req.Profile == profileTails && persistenceMode == persistenceModePlain {
 		return CreatePlan{}, fmt.Errorf("Tails persistence must be encrypted")
 	}
-	if persistenceMode == persistenceModeEncrypted && !inspection.SupportsEncryptedPersistence {
+	if persistenceMode == persistenceModeEncrypted && !inspection.SupportsEncryptedPersistence && !remasterEncryptedPersistenceEligible(spec, req.SourceRole, inspection) {
 		return CreatePlan{}, fmt.Errorf("encrypted persistence is not supported for this ISO/profile combination: %s", isoPath)
 	}
 
 	notes := []string{
-		"Source media may be local or, when configured, downloaded into the managed cache before planning.",
+		"Source preparation and downloads run only after build confirmation.",
 	}
 	if req.LiveToolGroups != nil {
 		if len(liveToolGroups) == 0 {
@@ -394,6 +377,7 @@ func buildCreatePlan(config RuntimeConfig, req CreateRequest) (CreatePlan, error
 	}
 
 	return CreatePlan{
+		Preparation:                 cloneSourcePreparation(req.Preparation),
 		Title:                       fmt.Sprintf("%s USB", spec.MenuLabel),
 		Profile:                     req.Profile,
 		SourceRole:                  req.SourceRole,

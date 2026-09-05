@@ -812,7 +812,7 @@ func TestPrepareManagedInstallerSourceUsesSudoForManagedBundle(t *testing.T) {
 	}
 	defer os.Setenv("PATH", oldPath)
 
-	backend := &Backend{pythonHelper: helperPath}
+	backend := &Backend{effectiveUID: func() int { return 1000 }, pythonHelper: helperPath}
 	path, err := backend.PrepareManagedInstallerSource("debian", "netinst", "/tmp/vmlinuz", "/tmp/initrd.gz", "/tmp/source.iso", nil, "", "", "")
 	if err != nil {
 		t.Fatalf("prepare managed installer source: %v", err)
@@ -855,7 +855,7 @@ func TestPrepareManagedInstallerSourcePassesSelectedExtraModules(t *testing.T) {
 	}
 	defer os.Setenv("PATH", oldPath)
 
-	backend := &Backend{pythonHelper: helperPath}
+	backend := &Backend{effectiveUID: func() int { return 1000 }, pythonHelper: helperPath}
 	_, err := backend.PrepareManagedInstallerSource(
 		"debian",
 		"netinst",
@@ -955,7 +955,7 @@ func TestPrepareManagedInstallerSourcePassesRepoInitrdContentWithSudo(t *testing
 	}
 	defer os.Setenv("PATH", oldPath)
 
-	backend := &Backend{pythonHelper: helperPath}
+	backend := &Backend{effectiveUID: func() int { return 1000 }, pythonHelper: helperPath}
 	_, err := backend.PrepareManagedInstallerSource(
 		"debian",
 		"netinst",
@@ -1002,7 +1002,7 @@ func TestRemasterLiveInitrdSourcePassesSelectedOverlayWithSudo(t *testing.T) {
 	}
 	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	backend := &Backend{pythonHelper: helperPath}
+	backend := &Backend{effectiveUID: func() int { return 1000 }, pythonHelper: helperPath}
 	isoPath, err := backend.RemasterLiveInitrdSource("debian", "/tmp/source.iso", "/worktree/initrd/debian/live")
 	if err != nil {
 		t.Fatalf("remaster Live initrd source: %v", err)

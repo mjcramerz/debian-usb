@@ -1,0 +1,15 @@
+PASS secrets.sh
+PASS .githooks/pre-commit
+PASS .githooks/pre-push
+PASS scripts/build_iso.sh
+PASS scripts/install-git-hooks.sh
+PASS scripts/install.sh
+PASS scripts/make-host.sh
+PASS scripts/write_usb.sh
+PASS scripts/debian-usb-python
+PASS config-hooks/0500-apt-live-medium.sh
+PASS config-hooks/1000-network-wifi.sh
+PASS tests/shell/test_device_release.sh
+PASS tests/shell/test_live_apt_hook.sh
+PASS tests/shell/test_live_wifi_hook.sh
+PASS tests/shell/test_multios_live_tools.sh

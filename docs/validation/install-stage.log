@@ -1,0 +1,42 @@
+Installing managed debian-usb assets
+  Mode             staged install
+  Repo root        /mnt/data/work/debian-usb
+Install complete
+  Binary           /tmp/tmp.OSOr83zjun/usr/bin/debian-usb
+  Config           /tmp/tmp.OSOr83zjun/etc/debian-usb/debian-usb.conf
+  Helpers          /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/debian-usb-python, /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/debian-usb-write, /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/debian-usb-build-iso
+  Spec tree        /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/spec
+  Preseed tree     /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/preseed
+  Initrd overlay tree /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/initrd
+  Persistence      /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/persistence
+  Python tree      /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/python/debian_usb
+  Config hooks     /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/config-hooks
+  State dir        /tmp/tmp.OSOr83zjun/var/lib/debian-usb
+  Download root    /tmp/tmp.OSOr83zjun/data/downloads/debian-usb (runtime-managed; install leaves it untouched)
+  Log dir          /tmp/tmp.OSOr83zjun/var/log/debian-usb
+  Work dir         /tmp/tmp.OSOr83zjun/data/tmp/debian-usb
+  Planned executions /tmp/tmp.OSOr83zjun/data/cfg/debian-usb/planned-executions
+  Docs             /tmp/tmp.OSOr83zjun/usr/share/doc/debian-usb/README.md
+debian-usb
+
+Usage:
+  debian-usb
+
+Local ISO workflows: create bootable USB media, build custom Debian ISOs, or rebuild existing Debian installer ISOs.
+Removing managed debian-usb runtime files
+  Mode             staged install
+  Removed binary   /tmp/tmp.OSOr83zjun/usr/bin/debian-usb
+  Removed python helper /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/debian-usb-python
+  Removed write helper /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/debian-usb-write
+  Removed build-iso helper /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/debian-usb-build-iso
+  Removed helper install env /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/install.env
+  Removed config file /tmp/tmp.OSOr83zjun/etc/debian-usb/debian-usb.conf
+  Removed documentation /tmp/tmp.OSOr83zjun/usr/share/doc/debian-usb/README.md
+  Removed spec tree /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/spec
+  Removed preseed tree /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/preseed
+  Removed initrd overlay tree /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/initrd
+  Removed persistence tree /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/persistence
+  Removed python tree /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/python/debian_usb
+  Removed config hooks tree /tmp/tmp.OSOr83zjun/usr/lib/debian-usb/config-hooks
+Uninstall phase complete
+PASS: staged install, documentation, CLI, Python profile, private file mode, uninstall.

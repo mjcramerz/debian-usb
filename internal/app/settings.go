@@ -28,7 +28,7 @@ func (a *App) settingsMenu() (menuAction, error) {
 			infoRow{Label: "Installer policy", Value: a.config.DefaultInstallerPolicy},
 			infoRow{Label: "Additional installer kernel parameters", Value: configuredState(a.config.DefaultInstallerKernelExtras)},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Live Defaults", Detail: "Persistence size, live boot policy, toram, memory limit, and shared live/forensics extras."},
 			menuEntry{Key: "2", Label: "Installer Defaults", Detail: "Default installer policy and shared installer extras applied to installer-capable media."},
 			menuEntry{Key: "3", Label: "Profile Overrides", Detail: "Per-profile live, forensics, installer, and installer-URL overrides."},
@@ -99,7 +99,7 @@ func (a *App) liveDefaultsMenu() (menuAction, error) {
 			infoRow{Label: "Additional live kernel parameters", Value: displayValueOrNone(a.config.DefaultLiveKernelExtras)},
 			infoRow{Label: "Additional forensics kernel parameters", Value: displayValueOrNone(a.config.DefaultForensicsKernelExtras)},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Set Default Persistence Size", Detail: fmt.Sprintf("Current: %d GiB", a.config.DefaultPersistenceSizeGiB)},
 			menuEntry{Key: "2", Label: "Set Default Live Boot Policy", Detail: fmt.Sprintf("Current: %s", a.config.DefaultBootPolicy)},
 			menuEntry{Key: "3", Label: "Toggle Copy Live System To RAM", Detail: fmt.Sprintf("Current: %s", onOffLabel(a.config.DefaultLiveToram))},
@@ -201,7 +201,7 @@ func (a *App) installerDefaultsMenu() (menuAction, error) {
 			infoRow{Label: "Effective shared installer arguments", Value: displayValueOrNone(a.defaultInstallerKernelArgs())},
 			infoRow{Label: "Additional installer kernel parameters", Value: displayValueOrNone(a.config.DefaultInstallerKernelExtras)},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Set Default Installer Policy", Detail: fmt.Sprintf("Current: %s", a.config.DefaultInstallerPolicy)},
 			menuEntry{Key: "2", Label: "Set Additional Installer Kernel Parameters", Detail: fmt.Sprintf("Current: %s", displayValueOrNone(a.config.DefaultInstallerKernelExtras))},
 			menuEntry{Key: "b", Label: "Go Back"},
@@ -261,7 +261,7 @@ func (a *App) profileOverridesMenu() (menuAction, error) {
 			})
 		}
 		entries = append(entries, menuEntry{Key: "b", Label: "Go Back"}, menuEntry{Key: "e", Label: "Exit"})
-		printMenu(entries...)
+		a.printMenu(entries...)
 		choice, err := a.promptChoice("Select a profile")
 		if err != nil {
 			return menuStay, err
@@ -301,7 +301,7 @@ func (a *App) profileSettingsMenu(profile string) (menuAction, error) {
 				infoRow{Label: "Managed mode", Value: "Direct write only"},
 				infoRow{Label: "Overrides", Value: "No managed boot overrides apply to this profile"},
 			)
-			printMenu(menuEntry{Key: "b", Label: "Go Back"}, menuEntry{Key: "e", Label: "Exit"})
+			a.printMenu(menuEntry{Key: "b", Label: "Go Back"}, menuEntry{Key: "e", Label: "Exit"})
 			choice, err := a.promptChoice("Select an option")
 			if err != nil {
 				return menuStay, err
@@ -368,7 +368,7 @@ func (a *App) profileSettingsMenu(profile string) (menuAction, error) {
 			Detail: fmt.Sprintf("Current: %s", displayValueOrNone(a.profilePreseedURL(profile))),
 		})
 		entries = append(entries, menuEntry{Key: "b", Label: "Go Back"}, menuEntry{Key: "e", Label: "Exit"})
-		printMenu(entries...)
+		a.printMenu(entries...)
 
 		choice, err := a.promptChoice("Select an option")
 		if err != nil {
@@ -568,7 +568,7 @@ func (a *App) printEffectiveManagedBootDefaults() {
 func (a *App) chooseLiveBootPolicy() (string, error) {
 	for {
 		printHeader("Live Boot Policy")
-		printMenu(policyMenuEntries(liveBootPolicyOptions, a.config.DefaultBootPolicy)...)
+		a.printMenu(policyMenuEntries(liveBootPolicyOptions, a.config.DefaultBootPolicy)...)
 		choice, err := a.promptChoice("Select the default live boot policy")
 		if err != nil {
 			return "", err
@@ -590,7 +590,7 @@ func (a *App) chooseLiveBootPolicy() (string, error) {
 func (a *App) chooseInstallerPolicy() (string, error) {
 	for {
 		printHeader("Installer Policy")
-		printMenu(policyMenuEntries(installerPolicyOptions, a.config.DefaultInstallerPolicy)...)
+		a.printMenu(policyMenuEntries(installerPolicyOptions, a.config.DefaultInstallerPolicy)...)
 		choice, err := a.promptChoice("Select the default installer policy")
 		if err != nil {
 			return "", err

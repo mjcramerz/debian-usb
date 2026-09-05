@@ -105,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     download_managed_source_cmd = subparsers.add_parser("download-managed-source")
     download_managed_source_cmd.add_argument("--key", required=True)
     download_managed_source_cmd.add_argument("--config", default="")
+    download_managed_source_cmd.add_argument("--expected-url", default="")
 
     prepare_installer_source_cmd = subparsers.add_parser("prepare-managed-installer-source")
     prepare_installer_source_cmd.add_argument("--profile", required=True)
@@ -140,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     remaster_live_tools_cmd = subparsers.add_parser("remaster-live-tools-source")
     remaster_live_tools_cmd.add_argument(
         "--profile",
-        choices=[PROFILE_DEBIAN, PROFILE_KALI_LINUX, PROFILE_UBUNTU_DESKTOP],
+        choices=[PROFILE_DEBIAN, PROFILE_KALI_LINUX, PROFILE_TAILS, PROFILE_UBUNTU_DESKTOP, PROFILE_UBUNTU_SERVER],
         required=True,
     )
     remaster_live_tools_cmd.add_argument("--source-iso", required=True)
@@ -149,6 +150,8 @@ def main(argv: list[str] | None = None) -> int:
     live_tool_selection.add_argument("--group", action="append", dest="selected_groups")
     live_tool_selection.add_argument("--no-tools", action="store_true")
     remaster_live_tools_cmd.add_argument("--live-kernel-args", default="")
+    remaster_live_tools_cmd.add_argument("--overlay-dir", default="")
+    remaster_live_tools_cmd.add_argument("--ensure-encrypted-persistence", action="store_true")
 
     validate_live_wifi_config_cmd = subparsers.add_parser("validate-live-wifi-config")
     validate_live_wifi_config_cmd.add_argument("--path", required=True)
@@ -229,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "list-devices":
             payload = list_devices()
         elif args.command == "download-managed-source":
-            payload = download_managed_source(args.config, args.key)
+            payload = download_managed_source(args.config, args.key, expected_url=args.expected_url)
         elif args.command == "prepare-managed-installer-source":
             payload = prepare_managed_installer_source(
                 args.profile,
@@ -255,6 +258,8 @@ def main(argv: list[str] | None = None) -> int:
                 args.output_dir,
                 selected_groups=[] if args.no_tools else args.selected_groups,
                 live_kernel_args=args.live_kernel_args,
+                overlay_dir=args.overlay_dir,
+                ensure_encrypted_persistence=args.ensure_encrypted_persistence,
             )
         elif args.command == "validate-live-wifi-config":
             render_debian_live_wifi_config(args.path)

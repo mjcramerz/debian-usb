@@ -136,10 +136,11 @@ var installerPolicyOptions = []policyOption{
 }
 
 type App struct {
-	backend *Backend
-	reader  *bufio.Reader
-	stdin   *os.File
-	config  RuntimeConfig
+	menuEntries []menuEntry
+	backend     *Backend
+	reader      *bufio.Reader
+	stdin       *os.File
+	config      RuntimeConfig
 }
 
 func New() (*App, error) {
@@ -180,7 +181,7 @@ func (a *App) mainMenu() error {
 	for {
 		printHeader(a.config.AppName)
 		printSection("Session", infoRow{Label: "Version", Value: a.config.AppVersion})
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Create USB", Detail: "local ISO -> USB"},
 			menuEntry{Key: "2", Label: "Build Custom ISO", Detail: "Debian live-build"},
 			menuEntry{Key: "3", Label: "Rebuild Installer ISO", Detail: "existing Debian installer ISO"},
@@ -240,7 +241,7 @@ func (a *App) createMenu() (menuAction, error) {
 			infoRow{Label: "Create", Value: "Provision a new USB from a local ISO or a saved plan"},
 			infoRow{Label: "Update", Value: "Refresh managed GRUB, preseed trees, and staged boot assets on an existing managed USB"},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Create New USB", Detail: "profile-driven create flow"},
 			menuEntry{Key: "2", Label: "Update USB", Detail: "refresh an existing managed USB without repartitioning"},
 			menuEntry{Key: "3", Label: "Planned Execution", Detail: "saved USB plan"},
@@ -294,7 +295,7 @@ func (a *App) createNewUSBFamilyMenu() (menuAction, error) {
 			infoRow{Label: "Debian-based", Value: "Debian, Kali Linux, Kali Purple, Tails"},
 			infoRow{Label: "Ubuntu-based", Value: "Ubuntu"},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Debian-based USB", Detail: "Debian, Kali Linux, Kali Purple, Tails, and Debian-family Multi-OS"},
 			menuEntry{Key: "2", Label: "Ubuntu-based USB", Detail: "Ubuntu"},
 			menuEntry{Key: "b", Label: "Go Back"},
@@ -339,7 +340,7 @@ func (a *App) debianBasedCreateMenu() (menuAction, error) {
 			infoRow{Label: "Managed", Value: "Debian, Kali Linux, Kali Purple, Tails"},
 			infoRow{Label: "Persistence", Value: "Debian, Kali Linux, Tails"},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Debian", Detail: "live | netinst | netboot"},
 			menuEntry{Key: "2", Label: "Kali Linux", Detail: "live | netinst | netboot"},
 			menuEntry{Key: "3", Label: "Kali Purple", Detail: "installer"},
@@ -411,7 +412,7 @@ func (a *App) ubuntuBasedCreateMenu() (menuAction, error) {
 			infoRow{Label: "Managed", Value: "Ubuntu"},
 			infoRow{Label: "Persistence", Value: "Ubuntu"},
 		)
-		printMenu(
+		a.printMenu(
 			menuEntry{Key: "1", Label: "Ubuntu", Detail: "casper live"},
 			menuEntry{Key: "b", Label: "Go Back"},
 			menuEntry{Key: "e", Label: "Exit"},
@@ -462,6 +463,7 @@ func (a *App) handleCreate(profileKey string) (menuAction, error) {
 	if action != menuStay {
 		return action, nil
 	}
+	plan.TargetDevice = &device
 	savedExecution, created, err := a.backend.SaveOrReusePlannedExecution(newSinglePlannedExecution(plan, device.Path))
 	if err != nil {
 		return menuStay, err
