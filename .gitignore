@@ -4,3 +4,4 @@ examples/
 initrd/debian/netinst/*.asc
 apt-update
 .mypy_cache/
+docs/validation/
