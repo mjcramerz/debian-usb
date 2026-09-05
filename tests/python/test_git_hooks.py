@@ -114,7 +114,7 @@ class GitSecretHookTests(unittest.TestCase):
         )
         self.preseed.write_text("\n".join(lines) + "\n", encoding="utf-8")
         self.preseed.chmod(0o600)
-        self.live.write_text(f"PRESEED_WIFI_PASSPHRASE='{wifi}'\n", encoding="utf-8")
+        self.live.write_text(f"LIVE_WIFI_PASSPHRASE='{wifi}'\n", encoding="utf-8")
         self.live.chmod(0o600)
         self.service.write_text(
             f'export SERVICE_CLIENT_SECRET = "{service_secret}"\n'
@@ -184,7 +184,7 @@ class GitSecretHookTests(unittest.TestCase):
             result.stderr,
         )
         self.assertIn(
-            "index initrd/debian/live/live.env: PRESEED_WIFI_PASSPHRASE",
+            "index initrd/debian/live/live.env: LIVE_WIFI_PASSPHRASE",
             result.stderr,
         )
         self.assertNotIn(root_value, result.stdout + result.stderr)
@@ -246,20 +246,26 @@ class GitSecretHookTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         preseed_text = self.preseed.read_text(encoding="utf-8")
+        live_text = self.live.read_text(encoding="utf-8")
         self.assertIn("PRESEED_CF_ACCESS_KEY=''", preseed_text)
         self.assertIn("PRESEED_ROOT_PASSWORD=''", preseed_text)
         self.assertIn("PRESEED_WIFI_PASSPHRASE=''", preseed_text)
+        self.assertNotIn("LIVE_WIFI_PASSPHRASE", preseed_text)
         self.assertIn("INSTALL_LOCALE='baseline'", preseed_text)
+        self.assertIn("LIVE_WIFI_PASSPHRASE=''", live_text)
+        self.assertNotIn("PRESEED_WIFI_PASSPHRASE", live_text)
         self.assertEqual(
             self.service.read_text(encoding="utf-8"),
             'export SERVICE_CLIENT_SECRET = ""\ncache_size = 64\n',
         )
         self.assertEqual(stat.S_IMODE(self.preseed.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(self.live.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(self.service.stat().st_mode), 0o640)
         for key in (
             "PRESEED_CF_ACCESS_KEY",
             "PRESEED_ROOT_PASSWORD",
             "PRESEED_WIFI_PASSPHRASE",
+            "LIVE_WIFI_PASSPHRASE",
             "SERVICE_CLIENT_SECRET",
         ):
             self.assertIn(key, result.stdout)

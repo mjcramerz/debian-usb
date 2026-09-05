@@ -85,12 +85,6 @@ func TestSaveRuntimeConfigRoundTripsManagedFields(t *testing.T) {
 	cfg.DefaultLiveMemGiB = 16
 	cfg.DefaultLiveHooks = true
 	cfg.DefaultLiveArgsHooks = "live-config.hooks=medium"
-	cfg.DefaultLiveWifiInterface = "wlan0"
-	cfg.DefaultLiveWifiESSID = "InstallNet"
-	cfg.DefaultLiveWifiSecurity = "sae"
-	cfg.DefaultLiveWifiCIDR = "192.168.50.45/24"
-	cfg.DefaultLiveWifiGateway = "192.168.50.1"
-	cfg.DefaultLiveWifiNameservers = "192.168.50.1, 9.9.9.9"
 	cfg.DefaultPreseedPublicURL = "https://example.test/public-preseed.cfg"
 	cfg.DefaultPreseedPublicArgs = "debian-installer/allow_unauthenticated_ssl=true public=1"
 	cfg.DefaultPreseedInternalArgs = "internal=1"
@@ -129,24 +123,6 @@ func TestSaveRuntimeConfigRoundTripsManagedFields(t *testing.T) {
 	}
 	if reloaded.DefaultLiveArgsHooks != "live-config.hooks=medium" {
 		t.Fatalf("expected live hook args to round-trip, got %q", reloaded.DefaultLiveArgsHooks)
-	}
-	if reloaded.DefaultLiveWifiInterface != "wlan0" {
-		t.Fatalf("expected live Wi-Fi interface to round-trip, got %q", reloaded.DefaultLiveWifiInterface)
-	}
-	if reloaded.DefaultLiveWifiESSID != "InstallNet" {
-		t.Fatalf("expected live Wi-Fi ESSID to round-trip, got %q", reloaded.DefaultLiveWifiESSID)
-	}
-	if reloaded.DefaultLiveWifiSecurity != "sae" {
-		t.Fatalf("expected live Wi-Fi security to round-trip, got %q", reloaded.DefaultLiveWifiSecurity)
-	}
-	if reloaded.DefaultLiveWifiCIDR != "192.168.50.45/24" {
-		t.Fatalf("expected live Wi-Fi CIDR to round-trip, got %q", reloaded.DefaultLiveWifiCIDR)
-	}
-	if reloaded.DefaultLiveWifiGateway != "192.168.50.1" {
-		t.Fatalf("expected live Wi-Fi gateway to round-trip, got %q", reloaded.DefaultLiveWifiGateway)
-	}
-	if reloaded.DefaultLiveWifiNameservers != "192.168.50.1,9.9.9.9" {
-		t.Fatalf("expected live Wi-Fi nameservers to normalize, got %q", reloaded.DefaultLiveWifiNameservers)
 	}
 	if reloaded.DefaultPreseedPublicURL != "https://example.test/public-preseed.cfg" {
 		t.Fatalf("expected shared public preseed URL to round-trip, got %q", reloaded.DefaultPreseedPublicURL)
@@ -259,22 +235,6 @@ func TestSaveRuntimeConfigPreservesAdditionalKeys(t *testing.T) {
 	}
 }
 
-func TestLoadRuntimeConfigRejectsLiveWifiCIDRWithoutPrefix(t *testing.T) {
-	content, err := os.ReadFile(repoConfigPath())
-	if err != nil {
-		t.Fatalf("read repo config: %v", err)
-	}
-	text := replaceConfigAssignmentForTest(t, string(content), "DEFAULT_LIVE_WIFI_CIDR", "192.168.50.45")
-	path := filepath.Join(t.TempDir(), "bad-live-wifi-cidr.conf")
-	if err := os.WriteFile(path, []byte(text), 0644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	if _, err := loadRuntimeConfig(path); err == nil || !strings.Contains(err.Error(), "DEFAULT_LIVE_WIFI_CIDR must include a CIDR prefix") {
-		t.Fatalf("expected CIDR prefix validation error, got %v", err)
-	}
-}
-
 func TestLoadRuntimeConfigRejectsInvalidManagedSourceURL(t *testing.T) {
 	content, err := os.ReadFile(repoConfigPath())
 	if err != nil {
@@ -334,68 +294,40 @@ func TestLoadRuntimeConfigRejectsInvalidPartitionLabels(t *testing.T) {
 	}
 }
 
-func TestLoadRuntimeConfigRejectsLiveWifiSecurityAliases(t *testing.T) {
+func TestLoadRuntimeConfigDropsObsoleteGlobalLiveWifiFields(t *testing.T) {
 	content, err := os.ReadFile(repoConfigPath())
 	if err != nil {
 		t.Fatalf("read repo config: %v", err)
 	}
-	for _, alias := range []string{"wpa2", "wpa3", "none", "psk"} {
-		t.Run(alias, func(t *testing.T) {
-			text := replaceConfigAssignmentForTest(t, string(content), "DEFAULT_LIVE_WIFI_SECURITY", alias)
-			path := filepath.Join(t.TempDir(), "bad-live-wifi-security.conf")
-			if err := os.WriteFile(path, []byte(text), 0644); err != nil {
-				t.Fatalf("write config: %v", err)
-			}
-
-			if _, err := loadRuntimeConfig(path); err == nil || !strings.Contains(err.Error(), "DEFAULT_LIVE_WIFI_SECURITY must be one of: open, wpa, sae") {
-				t.Fatalf("expected live Wi-Fi security validation error, got %v", err)
-			}
-		})
-	}
-}
-
-func TestLoadRuntimeConfigRejectsLiveWifiInterfaceWhitespace(t *testing.T) {
-	content, err := os.ReadFile(repoConfigPath())
-	if err != nil {
-		t.Fatalf("read repo config: %v", err)
-	}
-	text := strings.Replace(string(content), `DEFAULT_LIVE_WIFI_INTERFACE="wlan0"`, `DEFAULT_LIVE_WIFI_INTERFACE="wlan 0"`, 1)
-	path := filepath.Join(t.TempDir(), "bad-live-wifi-interface.conf")
-	if err := os.WriteFile(path, []byte(text), 0644); err != nil {
+	legacy := string(content) + `
+DEFAULT_LIVE_WIFI_INTERFACE="wlan0"
+DEFAULT_LIVE_WIFI_ESSID="Install Net"
+DEFAULT_LIVE_WIFI_SECURITY="wpa"
+DEFAULT_LIVE_WIFI_CIDR="192.168.50.45/24"
+DEFAULT_LIVE_WIFI_GATEWAY="192.168.50.1"
+DEFAULT_LIVE_WIFI_NAMESERVERS="192.168.50.1"
+`
+	path := filepath.Join(t.TempDir(), "legacy-live-wifi.conf")
+	if err := os.WriteFile(path, []byte(legacy), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	if _, err := loadRuntimeConfig(path); err == nil || !strings.Contains(err.Error(), "DEFAULT_LIVE_WIFI_INTERFACE must not contain whitespace") {
-		t.Fatalf("expected live Wi-Fi interface validation error, got %v", err)
-	}
-}
-
-func TestLoadRuntimeConfigAcceptsLiveWifiESSIDWhitespace(t *testing.T) {
-	path := writeBackendLiveHookTestConfig(t)
 	cfg, err := loadRuntimeConfig(path)
 	if err != nil {
-		t.Fatalf("load synthetic config: %v", err)
+		t.Fatalf("load config with obsolete Live Wi-Fi fields: %v", err)
 	}
-	cfg.DefaultLiveWifiESSID = "Install Net"
 	if _, err := saveRuntimeConfig(path, cfg); err != nil {
-		t.Fatalf("save Wi-Fi ESSID whitespace: %v", err)
+		t.Fatalf("rewrite config without obsolete Live Wi-Fi fields: %v", err)
 	}
-	reloaded, err := loadRuntimeConfig(path)
+	rendered, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("reload Wi-Fi ESSID whitespace: %v", err)
+		t.Fatalf("read rewritten config: %v", err)
 	}
-	if reloaded.DefaultLiveWifiESSID != "Install Net" {
-		t.Fatalf("unexpected Wi-Fi ESSID: %q", reloaded.DefaultLiveWifiESSID)
-	}
-	kernelArgs := liveHookKernelArgsForConfig(reloaded, profileDebian)
-	if !strings.Contains(kernelArgs, "live_wifi_essid_b64=SW5zdGFsbCBOZXQ") {
-		t.Fatalf("expected encoded Live Wi-Fi ESSID argument, got %q", kernelArgs)
-	}
-	if strings.Contains(kernelArgs, "live_wifi_psk") || strings.Contains(kernelArgs, "Install Net") {
-		t.Fatalf("secret transport or raw ESSID leaked into kernel arguments: %q", kernelArgs)
+	if strings.Contains(string(rendered), "DEFAULT_LIVE_WIFI_") {
+		t.Fatalf("rewritten config retained obsolete Live Wi-Fi fields:\n%s", rendered)
 	}
 }
 
-func TestLoadRuntimeConfigRejectsLiveWifiPassphraseKernelArguments(t *testing.T) {
+func TestLoadRuntimeConfigRejectsAllLiveWifiKernelArguments(t *testing.T) {
 	content, err := os.ReadFile(repoConfigPath())
 	if err != nil {
 		t.Fatalf("read repo config: %v", err)

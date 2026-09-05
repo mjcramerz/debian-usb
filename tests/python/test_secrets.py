@@ -34,6 +34,7 @@ PRESEED_SECRET_KEYS = (
     "PRESEED_OBS_USERNAME",
     "PRESEED_OBS_PASSWORD",
 )
+LIVE_SECRET_KEYS = ("LIVE_WIFI_PASSPHRASE",)
 LEGACY_GRUB_SECRET_KEYS = (
     "fruux_username",
     "fruux_password",
@@ -50,7 +51,7 @@ LEGACY_GRUB_SECRET_KEYS = (
     "obs_username",
     "obs_password",
 )
-CANONICAL_SECRET_KEYS = PRESEED_SECRET_KEYS
+CANONICAL_SECRET_KEYS = PRESEED_SECRET_KEYS + LIVE_SECRET_KEYS
 
 
 class SecretsScriptTests(unittest.TestCase):
@@ -98,7 +99,10 @@ class SecretsScriptTests(unittest.TestCase):
         self.preseed.chmod(0o644)
 
         self.live = live_dir / "live.env"
-        self.original_live = "# preserved live comment\n"
+        self.original_live = (
+            "# preserved live comment\n"
+            "LIVE_WIFI_PASSPHRASE='old-live-wifi'\n"
+        )
         self.live.write_text(self.original_live, encoding="utf-8")
         self.live.chmod(0o644)
 
@@ -118,17 +122,20 @@ class SecretsScriptTests(unittest.TestCase):
             path.write_text(self.auxiliary_config_original, encoding="utf-8")
             path.chmod(0o640)
 
-        self.auxiliary_env_original = (
-            "PRESEED_ROOT_PASSWORD='copy-root'\n"
-            "PRESEED_WIFI_PASSPHRASE='copy-wifi'\n"
-        )
-        self.auxiliary_envs = (
-            example_dir / "preseed.env",
-            preseed_dir / "preseed.env.bak",
-            live_dir / "live.env.snapshot",
-        )
-        for path in self.auxiliary_envs:
-            path.write_text(self.auxiliary_env_original, encoding="utf-8")
+        self.auxiliary_env_originals = {
+            example_dir / "preseed.env": (
+                "PRESEED_ROOT_PASSWORD='copy-root'\n"
+                "PRESEED_WIFI_PASSPHRASE='copy-netinst-wifi'\n"
+            ),
+            preseed_dir / "preseed.env.bak": (
+                "PRESEED_ROOT_PASSWORD='copy-root'\n"
+                "PRESEED_WIFI_PASSPHRASE='copy-netinst-wifi'\n"
+            ),
+            live_dir / "live.env.snapshot": "LIVE_WIFI_PASSPHRASE='copy-live-wifi'\n",
+        }
+        self.auxiliary_envs = tuple(self.auxiliary_env_originals)
+        for path, original in self.auxiliary_env_originals.items():
+            path.write_text(original, encoding="utf-8")
             path.chmod(0o600)
 
         self.untargeted_example = example_dir / "other.conf"
@@ -162,7 +169,10 @@ class SecretsScriptTests(unittest.TestCase):
         preseed_text = self.preseed.read_text(encoding="utf-8")
         for key in PRESEED_SECRET_KEYS:
             self.assertEqual(len(re.findall(rf"(?m)^{re.escape(key)}=''$", preseed_text)), 1)
-        self.assertEqual(self.live.read_text(encoding="utf-8").count("PRESEED_WIFI_PASSPHRASE=''"), 1)
+        live_text = self.live.read_text(encoding="utf-8")
+        for key in LIVE_SECRET_KEYS:
+            self.assertEqual(len(re.findall(rf"(?m)^{re.escape(key)}=''$", live_text)), 1)
+        self.assertNotIn("PRESEED_WIFI_PASSPHRASE", live_text)
         self.assertEqual(stat.S_IMODE(self.config.stat().st_mode), 0o640)
         self.assertEqual(stat.S_IMODE(self.preseed.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(self.live.stat().st_mode), 0o600)
@@ -177,10 +187,12 @@ class SecretsScriptTests(unittest.TestCase):
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
         for path in self.auxiliary_envs:
             with self.subTest(path=path.name):
-                self.assertEqual(
-                    path.read_text(encoding="utf-8"),
-                    "PRESEED_ROOT_PASSWORD=''\nPRESEED_WIFI_PASSPHRASE=''\n",
+                expected = (
+                    "LIVE_WIFI_PASSPHRASE=''\n"
+                    if path.name == "live.env.snapshot"
+                    else "PRESEED_ROOT_PASSWORD=''\nPRESEED_WIFI_PASSPHRASE=''\n"
                 )
+                self.assertEqual(path.read_text(encoding="utf-8"), expected)
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertEqual(self.untargeted_example.read_text(encoding="utf-8"), self.untargeted_original)
 
@@ -225,9 +237,9 @@ class SecretsScriptTests(unittest.TestCase):
             [getpass_module.GetPassWarning, EncodingWarning],
         )
 
-    def test_set_writes_one_wifi_preseed_value_to_netinst_and_live_envs(self) -> None:
+    def test_set_keeps_netinst_and_live_wifi_passphrases_separate(self) -> None:
         values = {
-            "PRESEED_WIFI_PASSPHRASE": "Shared WiFi Value",
+            "PRESEED_WIFI_PASSPHRASE": "Netinst WiFi Value",
             "PRESEED_FRUUX_USERNAME": "fruux-user",
             "PRESEED_FRUUX_PASSWORD": "fruux=value",
             "PRESEED_PRIMARY_USERNAME": "primary-user",
@@ -242,6 +254,7 @@ class SecretsScriptTests(unittest.TestCase):
             "PRESEED_CF_APTLY_SECRET_KEY": "R2SECRET==",
             "PRESEED_OBS_USERNAME": "observer@example",
             "PRESEED_OBS_PASSWORD": "obs%pass",
+            "LIVE_WIFI_PASSPHRASE": "Live WiFi Value",
         }
         input_text = "".join(f"{values[key]}\n" for key in CANONICAL_SECRET_KEYS)
 
@@ -256,11 +269,16 @@ class SecretsScriptTests(unittest.TestCase):
         for key in PRESEED_SECRET_KEYS:
             self.assertIn(f"{key}='{values[key]}'", preseed_text)
             self.assertNotIn(values[key], config_text)
-        self.assertIn(f"PRESEED_WIFI_PASSPHRASE='{values['PRESEED_WIFI_PASSPHRASE']}'", live_text)
+        self.assertNotIn("LIVE_WIFI_PASSPHRASE", preseed_text)
+        self.assertNotIn(values["LIVE_WIFI_PASSPHRASE"], preseed_text)
+        self.assertIn(f"LIVE_WIFI_PASSPHRASE='{values['LIVE_WIFI_PASSPHRASE']}'", live_text)
+        self.assertNotIn("PRESEED_WIFI_PASSPHRASE", live_text)
+        self.assertNotIn(values["PRESEED_WIFI_PASSPHRASE"], live_text)
         self.assertNotIn(values["PRESEED_ROOT_PASSWORD"], live_text)
         self.assertEqual(stat.S_IMODE(self.preseed.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(self.live.stat().st_mode), 0o600)
         self.assertEqual(result.stderr.count("PRESEED_WIFI_PASSPHRASE: "), 1)
+        self.assertEqual(result.stderr.count("LIVE_WIFI_PASSPHRASE: "), 1)
         for value in values.values():
             self.assertNotIn(value, result.stdout + result.stderr)
         self.assert_auxiliary_files_cleared()

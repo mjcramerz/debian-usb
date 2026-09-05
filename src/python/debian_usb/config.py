@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-import ipaddress
 import json
 import os
 from pathlib import Path
@@ -109,11 +108,38 @@ LEGACY_SECRET_KERNEL_ARG_NAMES = frozenset(
 LEGACY_SECRET_KERNEL_ARG_DESTINATION = "initrd/debian/netinst/preseed.env"
 LIVE_WIFI_SECRET_KERNEL_ARG_NAMES = frozenset(
     {
+        "DEFAULT_LIVE_WIFI_INTERFACE",
+        "DEFAULT_LIVE_WIFI_ESSID",
+        "DEFAULT_LIVE_WIFI_SECURITY",
+        "DEFAULT_LIVE_WIFI_CIDR",
+        "DEFAULT_LIVE_WIFI_GATEWAY",
+        "DEFAULT_LIVE_WIFI_NAMESERVERS",
         "DEFAULT_LIVE_WIFI_PSK",
+        "LIVE_WIFI_INTERFACE",
+        "LIVE_WIFI_ESSID",
+        "LIVE_WIFI_SECURITY",
+        "LIVE_WIFI_CIDR",
+        "LIVE_WIFI_GATEWAY",
+        "LIVE_WIFI_NAMESERVERS",
+        "LIVE_WIFI_PASSPHRASE",
         "PRESEED_WIFI_PASSPHRASE",
+        "live_wifi",
+        "live_wifi_enabled",
+        "live_wifi_interface",
+        "live_wifi_iface",
+        "live_wifi_ssid",
+        "live_wifi_essid",
+        "live_wifi_essid_b64",
+        "live_wifi_security",
+        "live_wifi_cidr",
+        "live_wifi_gateway",
+        "live_wifi_nameservers",
         "live_wifi_psk",
         "live_wifi_psk_b64",
         "live_wifi_wpa",
+        "netcfg/choose_interface",
+        "netcfg/wireless_essid",
+        "netcfg/wireless_security_type",
         "netcfg/wireless_wpa",
     }
 )
@@ -292,20 +318,13 @@ CONFIG_SECTIONS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
     (
         "Live config hooks",
         (
-            "When DEFAULT_LIVE_HOOKS is enabled, Debian raw-ISO Live payloads receive repo-managed live-config hooks.",
-            "Only non-secret DEFAULT_LIVE_WIFI_* values are appended to Live entries.",
-            "The passphrase is read from PRESEED_WIFI_PASSPHRASE in the selected Debian Live initrd overlay.",
-            "Supported Wi-Fi security modes are open, wpa, and sae; sae maps to WPA3/SAE.",
+            "Debian Live always receives the APT repair and Wi-Fi hooks plus live-config.hooks=medium.",
+            "DEFAULT_LIVE_HOOKS controls only optional additional hook arguments.",
+            "Every Wi-Fi value is read from initrd/debian/live/live.env and never appended to kernel arguments.",
         ),
         (
             "DEFAULT_LIVE_HOOKS",
             "DEFAULT_LIVE_ARGS_HOOKS",
-            "DEFAULT_LIVE_WIFI_INTERFACE",
-            "DEFAULT_LIVE_WIFI_ESSID",
-            "DEFAULT_LIVE_WIFI_SECURITY",
-            "DEFAULT_LIVE_WIFI_CIDR",
-            "DEFAULT_LIVE_WIFI_GATEWAY",
-            "DEFAULT_LIVE_WIFI_NAMESERVERS",
         ),
     ),
     (
@@ -429,12 +448,6 @@ def _required_config_keys() -> tuple[str, ...]:
         "DEFAULT_LIVE_MEM_GIB",
         "DEFAULT_LIVE_HOOKS",
         "DEFAULT_LIVE_ARGS_HOOKS",
-        "DEFAULT_LIVE_WIFI_INTERFACE",
-        "DEFAULT_LIVE_WIFI_ESSID",
-        "DEFAULT_LIVE_WIFI_SECURITY",
-        "DEFAULT_LIVE_WIFI_CIDR",
-        "DEFAULT_LIVE_WIFI_GATEWAY",
-        "DEFAULT_LIVE_WIFI_NAMESERVERS",
         "SHARED_LIVE_BASE_KERNEL_ARGS",
         "BOOT_POLICY_BALANCED_KERNEL_ARGS",
         "BOOT_POLICY_PERFORMANCE_KERNEL_ARGS",
@@ -481,12 +494,6 @@ def _optional_empty_keys() -> set[str]:
         "DEFAULT_INSTALLER_KERNEL_EXTRAS",
         "DEFAULT_FORENSICS_KERNEL_EXTRAS",
         "DEFAULT_LIVE_ARGS_HOOKS",
-        "DEFAULT_LIVE_WIFI_INTERFACE",
-        "DEFAULT_LIVE_WIFI_ESSID",
-        "DEFAULT_LIVE_WIFI_SECURITY",
-        "DEFAULT_LIVE_WIFI_CIDR",
-        "DEFAULT_LIVE_WIFI_GATEWAY",
-        "DEFAULT_LIVE_WIFI_NAMESERVERS",
         "DEBIAN_PRESEED_PUBLIC_ARGS",
         "DEBIAN_PRESEED_INTERNAL_ARGS",
     }
@@ -640,29 +647,9 @@ def _reject_legacy_secret_kernel_args(value: str, key: str) -> None:
     if live_wifi_found:
         names = ", ".join(live_wifi_found)
         raise ValueError(
-            f"{key} contains forbidden Live Wi-Fi passphrase kernel argument(s): {names}; "
-            f"store the passphrase in {LIVE_WIFI_SECRET_KERNEL_ARG_DESTINATION}"
+            f"{key} contains forbidden Live Wi-Fi kernel argument(s): {names}; "
+            f"store every Wi-Fi value in {LIVE_WIFI_SECRET_KERNEL_ARG_DESTINATION}"
         )
-
-
-def _normalize_single_token_string(value: str, key: str) -> str:
-    normalized = value.strip()
-    if not normalized:
-        return ""
-    if any(char.isspace() for char in normalized):
-        raise ValueError(f"{key} must not contain whitespace")
-    return normalized
-
-
-def _normalize_live_wifi_text(value: str, key: str, *, max_bytes: int) -> str:
-    normalized = value.strip()
-    if not normalized:
-        return ""
-    if any(ord(char) < 32 or ord(char) == 127 for char in normalized):
-        raise ValueError(f"{key} must not contain control characters")
-    if len(normalized.encode("utf-8")) > max_bytes:
-        raise ValueError(f"{key} must not exceed {max_bytes} UTF-8 bytes")
-    return normalized
 
 
 def _normalize_partition_label(value: str, key: str) -> str:
@@ -675,32 +662,6 @@ def _normalize_partition_label(value: str, key: str) -> str:
     if any(ord(char) < 33 or ord(char) > 126 for char in normalized):
         raise ValueError(f"{key} {normalized!r} must contain printable ASCII without whitespace")
     return normalized
-
-
-def _normalize_ipv4_cidr_string(value: str, key: str) -> str:
-    normalized = _normalize_single_token_string(value, key)
-    if not normalized:
-        return ""
-    if "/" not in normalized:
-        raise ValueError(f"{key} must include a CIDR prefix such as 192.168.50.43/24")
-    try:
-        interface = ipaddress.IPv4Interface(normalized)
-    except ipaddress.AddressValueError as exc:
-        raise ValueError(f"{key} must use an IPv4 address") from exc
-    except ipaddress.NetmaskValueError as exc:
-        raise ValueError(f"{key} prefix must be between 0 and 32") from exc
-    except ValueError as exc:
-        raise ValueError(f"{key} must be a valid IPv4 CIDR value") from exc
-    return f"{interface.ip}/{interface.network.prefixlen}"
-
-
-def _validate_live_wifi_security_string(value: str) -> str:
-    token = _normalize_single_token_string(value, "DEFAULT_LIVE_WIFI_SECURITY")
-    if not token:
-        return ""
-    if token in {"open", "wpa", "sae"}:
-        return token
-    raise ValueError("DEFAULT_LIVE_WIFI_SECURITY must be one of: open, wpa, sae")
 
 
 def _validate_preseed_network_kernel_args(value: str, key: str) -> str:
@@ -811,31 +772,6 @@ def normalize_config(data: dict[str, str]) -> OrderedDict[str, str]:
     )
     normalized["DEFAULT_LIVE_ARGS_HOOKS"] = _normalize_kernel_args_string(
         normalized["DEFAULT_LIVE_ARGS_HOOKS"]
-    )
-    normalized["DEFAULT_LIVE_WIFI_INTERFACE"] = _normalize_single_token_string(
-        normalized["DEFAULT_LIVE_WIFI_INTERFACE"],
-        "DEFAULT_LIVE_WIFI_INTERFACE",
-    )
-    normalized["DEFAULT_LIVE_WIFI_ESSID"] = _normalize_live_wifi_text(
-        normalized["DEFAULT_LIVE_WIFI_ESSID"],
-        "DEFAULT_LIVE_WIFI_ESSID",
-        max_bytes=32,
-    )
-    normalized["DEFAULT_LIVE_WIFI_SECURITY"] = _validate_live_wifi_security_string(
-        normalized["DEFAULT_LIVE_WIFI_SECURITY"]
-    )
-    normalized["DEFAULT_LIVE_WIFI_CIDR"] = _normalize_ipv4_cidr_string(
-        normalized["DEFAULT_LIVE_WIFI_CIDR"],
-        "DEFAULT_LIVE_WIFI_CIDR",
-    )
-    normalized["DEFAULT_LIVE_WIFI_GATEWAY"] = _normalize_single_token_string(
-        normalized["DEFAULT_LIVE_WIFI_GATEWAY"],
-        "DEFAULT_LIVE_WIFI_GATEWAY",
-    )
-    normalized["DEFAULT_LIVE_WIFI_NAMESERVERS"] = ",".join(
-        item.strip()
-        for item in normalized["DEFAULT_LIVE_WIFI_NAMESERVERS"].replace(" ", ",").split(",")
-        if item.strip()
     )
     for key in PARTITION_LABEL_CONFIG_KEYS:
         normalized[key] = _normalize_partition_label(normalized[key], key)
@@ -1182,12 +1118,6 @@ def runtime_config(path: str) -> dict[str, object]:
         "default_live_mem_gib": int(data["DEFAULT_LIVE_MEM_GIB"]),
         "default_live_hooks": data["DEFAULT_LIVE_HOOKS"] == "1",
         "default_live_args_hooks": data["DEFAULT_LIVE_ARGS_HOOKS"],
-        "default_live_wifi_interface": data["DEFAULT_LIVE_WIFI_INTERFACE"],
-        "default_live_wifi_essid": data["DEFAULT_LIVE_WIFI_ESSID"],
-        "default_live_wifi_security": data["DEFAULT_LIVE_WIFI_SECURITY"],
-        "default_live_wifi_cidr": data["DEFAULT_LIVE_WIFI_CIDR"],
-        "default_live_wifi_gateway": data["DEFAULT_LIVE_WIFI_GATEWAY"],
-        "default_live_wifi_nameservers": data["DEFAULT_LIVE_WIFI_NAMESERVERS"],
         "default_partition_labels": {
             key: partition_label(data, key)
             for key in PARTITION_LABEL_CONFIG_KEYS

@@ -24,6 +24,7 @@ from .constants import (
 )
 from .downloads import download_managed_source
 from .installer_sources import prepare_managed_installer_source
+from .live_hooks import render_debian_live_wifi_config
 from .devices import list_devices, list_local_isos
 from .multios import payload_uuid_args_to_map, render_multios_grub, validate_multios_plan_file
 from .rebuild_iso import (
@@ -149,6 +150,9 @@ def main(argv: list[str] | None = None) -> int:
     live_tool_selection.add_argument("--no-tools", action="store_true")
     remaster_live_tools_cmd.add_argument("--live-kernel-args", default="")
 
+    validate_live_wifi_config_cmd = subparsers.add_parser("validate-live-wifi-config")
+    validate_live_wifi_config_cmd.add_argument("--path", required=True)
+
     validate_build_iso_plan_cmd = subparsers.add_parser("validate-build-iso-plan")
     validate_build_iso_plan_cmd.add_argument("--plan", required=True)
 
@@ -252,6 +256,9 @@ def main(argv: list[str] | None = None) -> int:
                 selected_groups=[] if args.no_tools else args.selected_groups,
                 live_kernel_args=args.live_kernel_args,
             )
+        elif args.command == "validate-live-wifi-config":
+            render_debian_live_wifi_config(args.path)
+            payload = {"valid": True}
         elif args.command == "validate-build-iso-plan":
             payload = validate_build_iso_plan_file(args.plan)
         elif args.command == "build-debian-iso":

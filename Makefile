@@ -80,16 +80,31 @@ check:
 	@sh tests/shell/test_multios_live_tools.sh >/dev/null
 	@sh tests/shell/test_device_release.sh >/dev/null
 	@grep -F 'initramfs-tools-core' configs/install.env >/dev/null
-	@tmpdir="$$(mktemp -d)"; \
+	@set -eu; \
+	tmpdir="$$(mktemp -d)"; \
+	repo_fixture="$$tmpdir/repo"; \
 	trap 'rm -rf "$$tmpdir"' 0; \
 	env -u DESTDIR sh ./scripts/make-host.sh describe-install | grep -F 'Privileges: root required for host writes; make will prompt through sudo' >/dev/null; \
 	env -u DESTDIR sh ./scripts/make-host.sh describe-nuke | grep -F 'Result: managed runtime files, logs, and state are permanently removed; the download root is preserved' >/dev/null; \
-		( cd "$$tmpdir" && DESTDIR="$$tmpdir/stage" sh "$(CURDIR)/scripts/make-host.sh" install >/dev/null ); \
+	install -d "$$repo_fixture/initrd/debian" "$$repo_fixture/build"; \
+	cp -a "$(CURDIR)/scripts" "$$repo_fixture/scripts"; \
+	cp -a "$(CURDIR)/configs" "$$repo_fixture/configs"; \
+	cp -a "$(CURDIR)/src" "$$repo_fixture/src"; \
+	cp -a "$(CURDIR)/config-hooks" "$$repo_fixture/config-hooks"; \
+	cp -a "$(CURDIR)/README.md" "$$repo_fixture/README.md"; \
+	cp -a "$(CURDIR)/initrd/debian/live" "$$repo_fixture/initrd/debian/live"; \
+	GOFLAGS= go build -o "$$repo_fixture/build/debian-usb" ./cmd/debian-usb; \
+	( cd "$$tmpdir" && DESTDIR="$$tmpdir/stage" sh "$$repo_fixture/scripts/make-host.sh" install >/dev/null ); \
 		test -x "$$tmpdir/stage/usr/bin/debian-usb"; \
 		test -f "$$tmpdir/stage/usr/lib/debian-usb/python/debian_usb/cli.py"; \
 		test -x "$$tmpdir/stage/usr/lib/debian-usb/debian-usb-build-iso"; \
 		test -x "$$tmpdir/stage/usr/lib/debian-usb/config-hooks/0500-apt-live-medium.sh"; \
 		test -x "$$tmpdir/stage/usr/lib/debian-usb/config-hooks/1000-network-wifi.sh"; \
+		test -f "$$tmpdir/stage/usr/lib/debian-usb/initrd/debian/live/live.env"; \
+		test "$$(stat -c '%a' "$$tmpdir/stage/usr/lib/debian-usb/initrd/debian/live/live.env")" = 600; \
+		grep -q '^LIVE_WIFI_PASSPHRASE=' "$$tmpdir/stage/usr/lib/debian-usb/initrd/debian/live/live.env"; \
+		! grep -q '^PRESEED_WIFI_PASSPHRASE=' "$$tmpdir/stage/usr/lib/debian-usb/initrd/debian/live/live.env"; \
+		test -x "$$tmpdir/stage/usr/lib/debian-usb/initrd/debian/live/scripts/init-bottom/debian-usb-live-env"; \
 			test -f "$$tmpdir/stage/usr/lib/debian-usb/spec/live/admin-tools.json"; \
 			test "$$(stat -c '%a' "$$tmpdir/stage/usr/lib/debian-usb/spec/live/admin-tools.json")" = 644; \
 			test "$$(stat -c '%a' "$$tmpdir/stage/usr/lib/debian-usb/python/debian_usb/live_tools.py")" = 644; \

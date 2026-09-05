@@ -34,7 +34,7 @@ PRESEED_SECRET_KEYS = (
     "PRESEED_OBS_USERNAME",
     "PRESEED_OBS_PASSWORD",
 )
-LIVE_SECRET_KEYS = ("PRESEED_WIFI_PASSPHRASE",)
+LIVE_SECRET_KEYS = ("LIVE_WIFI_PASSPHRASE",)
 LEGACY_GRUB_SECRET_KEYS = (
     "fruux_username",
     "fruux_password",
@@ -51,7 +51,7 @@ LEGACY_GRUB_SECRET_KEYS = (
     "obs_username",
     "obs_password",
 )
-CANONICAL_SECRET_KEYS = PRESEED_SECRET_KEYS
+CANONICAL_SECRET_KEYS = PRESEED_SECRET_KEYS + LIVE_SECRET_KEYS
 CANONICAL_SET = frozenset(CANONICAL_SECRET_KEYS)
 RETIRED_CONFIG_SET = frozenset(RETIRED_CONFIG_SECRET_KEYS)
 PRESEED_SET = frozenset(PRESEED_SECRET_KEYS)
@@ -476,9 +476,10 @@ def _read_value(key: str, input_stream: TextIO) -> str:
         if raw == "":
             raise SecretsError(f"input ended while reading {key}")
         value = raw.rstrip("\n")
-    if key != "PRESEED_WIFI_PASSPHRASE" and any(character.isspace() for character in value):
+    wifi_passphrase_keys = {"PRESEED_WIFI_PASSPHRASE", "LIVE_WIFI_PASSPHRASE"}
+    if key not in wifi_passphrase_keys and any(character.isspace() for character in value):
         raise SecretsError(f"{key} must not contain whitespace")
-    if key == "PRESEED_WIFI_PASSPHRASE" and any(
+    if key in wifi_passphrase_keys and any(
         ord(character) < 32 or ord(character) == 127 for character in value
     ):
         raise SecretsError(f"{key} must not contain control characters")

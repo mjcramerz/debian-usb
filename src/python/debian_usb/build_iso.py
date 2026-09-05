@@ -17,13 +17,20 @@ from .boot_parse import _find_boot_entries, _select_text_installer_entry
 from .constants import PROFILE_DEBIAN
 from .iso_source import open_source
 from .live_hooks import (
+    DEBIAN_LIVE_HOOK_KERNEL_ARGS,
     DEBIAN_LIVE_HOOK_PACKAGES,
+    DEBIAN_LIVE_INITRAMFS_MODULES,
+    DEBIAN_LIVE_KERNEL_CONFIG_SYMBOLS,
     DEBIAN_LIVE_LANGUAGE,
     DEBIAN_LIVE_LOCALE,
+    DEBIAN_LIVE_MODULE_ALIAS_CANDIDATES,
     LIVE_SYSTEMD_DISABLE_LINKS,
     LIVE_SYSTEMD_MASK_UNITS,
     stage_debian_live_config_hooks,
     stage_debian_live_locale,
+    stage_debian_live_medium_wifi_config,
+    stage_debian_live_wifi_config,
+    stage_live_kernel_module_policy,
     stage_live_systemd_masks,
 )
 from .live_tools import live_tool_packages_for_build_distro
@@ -229,6 +236,23 @@ def build_debian_iso(plan_path: str) -> dict[str, Any]:
         _materialize_workspace(build_root, plan, log_file, effective_udeb_dirs)
         _run_logged(["lb", "build"], cwd=build_root, log_file=log_file)
         iso_candidate = _locate_built_iso(build_root)
+
+        resolved_modules: dict[str, Any] = {}
+        if plan["installer_mode"] != "netinst":
+            live_apt_archive = _validate_live_apt_archive(
+                build_root / "binary",
+                plan["suite"],
+                plan["architecture"],
+            )
+            _log(log_file, f"Live APT archive: {json.dumps(live_apt_archive, sort_keys=True)}")
+            resolved_modules = _scan_module_tree(
+                build_root / "chroot",
+                set(plan["initramfs_modules"]),
+                set(plan["module_alias_candidates"]),
+            )
+            if plan["distro"] == DISTRO_DEBIAN:
+                _enforce_debian_live_module_contract(resolved_modules)
+
         final_iso_path = output_dir / plan["image_name"]
         shutil.copy2(iso_candidate, final_iso_path)
 
@@ -236,19 +260,6 @@ def build_debian_iso(plan_path: str) -> dict[str, Any]:
         if plan["installer_mode"] == "netinst":
             netinst_payload = validate_netinst_payload_iso(str(final_iso_path), plan["distro"])
             _log(log_file, f"Netinst payload: {json.dumps(netinst_payload, sort_keys=True)}")
-        else:
-            live_apt_archive = _validate_live_apt_archive(
-                build_root / "binary",
-                plan["suite"],
-                plan["architecture"],
-            )
-            _log(log_file, f"Live APT archive: {json.dumps(live_apt_archive, sort_keys=True)}")
-
-        resolved_modules = (
-            {}
-            if plan["installer_mode"] == "netinst"
-            else _scan_module_tree(build_root / "chroot", set(plan["initramfs_modules"]), set(plan["module_alias_candidates"]))
-        )
         if plan["installer_mode"] != "none" and plan["storage_tool_packages"] and not effective_udeb_dirs:
             warnings.append("Storage tool packages were added to the live environment only; no prebuilt .udeb directory was provided for Debian Installer staging.")
         if installer_audit is not None:
@@ -263,8 +274,8 @@ def build_debian_iso(plan_path: str) -> dict[str, Any]:
             )
         if plan["kernel_config_symbols"] and not kernel_evidence.get("config_path"):
             warnings.append("No kernel config file could be resolved for the selected target kernel version.")
-        if plan["rootfs_format"] == "erofs" and not any(module == "erofs" for module in resolved_modules["requested_matches"]):
-            warnings.append("The selected kernel tree did not expose erofs as a loadable module. This may be fine if it is built in, but validate live and installer boot paths carefully.")
+        if plan["rootfs_format"] == "erofs" and "erofs" not in _resolved_module_names(resolved_modules):
+            warnings.append("The selected kernel tree did not expose erofs as a loadable or built-in module. Validate live and installer boot paths carefully.")
         if plan["rootfs_format"] == "erofs" and not _has_xxhash_module(resolved_modules):
             warnings.append("The selected kernel tree did not expose an xxhash module under the requested or alias module names. Validate the exact kernel module names carried by the live and installer boot paths.")
 
@@ -533,9 +544,7 @@ def _materialize_workspace(build_root: Path, plan: dict[str, Any], log_file: Any
         )
 
     if plan["initramfs_modules"] and not netinst_only:
-        modules_dir = includes_chroot_dir / "usr" / "share" / "initramfs-tools" / "modules.d"
-        modules_dir.mkdir(parents=True, exist_ok=True)
-        _write_value_list(modules_dir / "debian-usb-live", plan["initramfs_modules"])
+        stage_live_kernel_module_policy(includes_chroot_dir, plan["initramfs_modules"])
         _write_initramfs_refresh_hook(hooks_dir / "7000-initramfs-modules.hook.chroot")
 
     if plan["filesystem_module_entries"] and not netinst_only:
@@ -544,7 +553,9 @@ def _materialize_workspace(build_root: Path, plan: dict[str, Any], log_file: Any
         _write_value_list(live_dir / "filesystem.module", plan["filesystem_module_entries"])
 
     if plan["distro"] == DISTRO_DEBIAN and not netinst_only:
+        stage_debian_live_wifi_config(includes_chroot_dir)
         stage_debian_live_config_hooks(includes_binary_dir / "live")
+        stage_debian_live_medium_wifi_config(includes_binary_dir / "live")
 
     if plan["rootfs_format"] == "erofs" and not netinst_only:
         _write_erofs_binary_hook(
@@ -1539,36 +1550,101 @@ def _locate_built_iso(build_root: Path) -> Path:
     return candidates[0]
 
 
+def _canonical_module_name(value: str) -> str:
+    return str(value).strip().replace("-", "_")
+
+
+def _module_name_lookup(values: set[str]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for value in sorted(values):
+        lookup.setdefault(_canonical_module_name(value), value)
+    return lookup
+
+
 def _scan_module_tree(chroot_root: Path, requested_modules: set[str], alias_candidates: set[str]) -> dict[str, Any]:
     module_root = chroot_root / "lib" / "modules"
     module_files = sorted(module_root.glob("**/*.ko*")) if module_root.is_dir() else []
+    requested_lookup = _module_name_lookup(requested_modules)
+    alias_lookup = _module_name_lookup(alias_candidates)
     discovered: list[str] = []
     requested_matches: list[str] = []
     alias_matches: list[str] = []
+    builtin_modules: set[str] = set()
+
+    for builtin_path in sorted(module_root.glob("*/modules.builtin")) if module_root.is_dir() else []:
+        for raw_line in builtin_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            module_path = raw_line.strip()
+            if module_path:
+                builtin_modules.add(_canonical_module_name(_module_name_from_path(Path(module_path))))
 
     for module_file in module_files:
         name = _module_name_from_path(module_file)
+        canonical_name = _canonical_module_name(name)
         discovered.append(name)
-        if name in requested_modules and name not in requested_matches:
-            requested_matches.append(name)
-        if name in alias_candidates and name not in alias_matches:
-            alias_matches.append(name)
+        requested_name = requested_lookup.get(canonical_name)
+        if requested_name is not None and requested_name not in requested_matches:
+            requested_matches.append(requested_name)
+        alias_name = alias_lookup.get(canonical_name)
+        if alias_name is not None and alias_name not in alias_matches:
+            alias_matches.append(alias_name)
 
+    requested_builtin = sorted(
+        requested_name
+        for canonical_name, requested_name in requested_lookup.items()
+        if canonical_name in builtin_modules
+    )
+    alias_builtin = sorted(
+        alias_name
+        for canonical_name, alias_name in alias_lookup.items()
+        if canonical_name in builtin_modules
+    )
+    resolved_requested = set(requested_matches).union(requested_builtin)
     return {
         "module_root": str(module_root),
         "requested_matches": requested_matches,
-        "requested_missing": sorted(requested_modules.difference(requested_matches)),
+        "requested_builtin": requested_builtin,
+        "requested_missing": sorted(requested_modules.difference(resolved_requested)),
         "alias_matches": alias_matches,
+        "alias_builtin": alias_builtin,
         "discovered_count": len(discovered),
     }
 
 
+def _resolved_module_names(resolved_modules: dict[str, Any]) -> set[str]:
+    resolved: set[str] = set()
+    for key in ("requested_matches", "requested_builtin", "alias_matches", "alias_builtin"):
+        resolved.update(_canonical_module_name(str(module)) for module in resolved_modules.get(key, []))
+    return resolved
+
+
 def _has_xxhash_module(resolved_modules: dict[str, Any]) -> bool:
-    for key in ("requested_matches", "alias_matches"):
-        for module in resolved_modules.get(key, []):
-            if "xxhash" in str(module):
-                return True
+    return any("xxhash" in module for module in _resolved_module_names(resolved_modules))
+
+
+def _required_live_module_is_resolved(module: str, resolved_names: set[str]) -> bool:
+    canonical = _canonical_module_name(module)
+    if canonical in resolved_names:
+        return True
+    if canonical == "xxhash":
+        return any("xxhash" in name for name in resolved_names)
+    if canonical == "xxhash_generic":
+        return any("xxhash" in name and "generic" in name for name in resolved_names)
     return False
+
+
+def _enforce_debian_live_module_contract(resolved_modules: dict[str, Any]) -> None:
+    resolved_names = _resolved_module_names(resolved_modules)
+    missing = [
+        module
+        for module in DEBIAN_LIVE_INITRAMFS_MODULES
+        if not _required_live_module_is_resolved(module, resolved_names)
+    ]
+    if missing:
+        module_root = resolved_modules.get("module_root") or "<unknown>"
+        raise RuntimeError(
+            "Debian Live kernel module contract is incomplete under "
+            f"{module_root}; missing: {', '.join(missing)}"
+        )
 
 
 def _audit_erofs_installer_support(plan: dict[str, Any], local_udeb_dirs: list[Path]) -> dict[str, Any]:
@@ -1784,6 +1860,26 @@ def _validate_build_iso_plan(plan: Any) -> dict[str, Any]:
             normalized["base_packages"] = _append_unique(
                 normalized["base_packages"],
                 list(DEBIAN_LIVE_HOOK_PACKAGES),
+            )
+            normalized["initramfs_modules"] = _append_unique(
+                normalized["initramfs_modules"],
+                list(DEBIAN_LIVE_INITRAMFS_MODULES),
+            )
+            normalized["kernel_inspection_modules"] = _append_unique(
+                normalized["kernel_inspection_modules"],
+                list(DEBIAN_LIVE_INITRAMFS_MODULES),
+            )
+            normalized["kernel_config_symbols"] = _append_unique(
+                normalized["kernel_config_symbols"],
+                list(DEBIAN_LIVE_KERNEL_CONFIG_SYMBOLS),
+            )
+            normalized["module_alias_candidates"] = _append_unique(
+                normalized["module_alias_candidates"],
+                list(DEBIAN_LIVE_MODULE_ALIAS_CANDIDATES),
+            )
+            normalized["bootappend_live"] = _merge_required_kernel_args(
+                normalized["bootappend_live"],
+                DEBIAN_LIVE_HOOK_KERNEL_ARGS,
             )
         if live_tool_packages:
             normalized["live_tool_profile"] = {
@@ -2210,6 +2306,18 @@ def _append_unique(existing: list[str], additional: list[str]) -> list[str]:
         seen.add(value)
         merged.append(value)
     return merged
+
+
+def _merge_required_kernel_args(existing: str, required: tuple[str, ...]) -> str:
+    tokens = str(existing or "").split()
+    separator_index = tokens.index("---") if "---" in tokens else len(tokens)
+    prefix = list(tokens[:separator_index])
+    suffix = list(tokens[separator_index:])
+    for required_arg in required:
+        key = required_arg.split("=", 1)[0]
+        prefix = [token for token in prefix if token != key and not token.startswith(key + "=")]
+        prefix.append(required_arg)
+    return " ".join([*prefix, *suffix])
 
 
 def _load_and_validate_udeb_rebuild_spec(spec_path: str) -> list[dict[str, Any]]:

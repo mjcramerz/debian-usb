@@ -1,5 +1,4 @@
 from pathlib import Path
-import base64
 import json
 import os
 import shutil
@@ -428,12 +427,28 @@ menuentry --hotkey=x '... Expert install' {
         self.assertEqual([entry.title for entry in entries], ["Graphical install", "Install", "... Expert install"])
         self.assertEqual(entries[2].menu_path, ("Advanced options ...",))
 
+    def test_live_boot_persistence_templates_cover_the_complete_root(self) -> None:
+        for relative_path in (
+            "configs/persistence-debian.conf",
+            "configs/persistence-kali.conf",
+        ):
+            with self.subTest(relative_path=relative_path):
+                directives = [
+                    line.strip()
+                    for line in Path(relative_path).read_text(encoding="utf-8").splitlines()
+                    if line.strip() and not line.lstrip().startswith("#")
+                ]
+                self.assertEqual(directives, ["/ union"])
+
     def test_adapt_managed_kali_persistence_keeps_persistence_enabled(self) -> None:
         entry = BootEntry(
             title="Live system with USB persistence",
             kernel_path="/live/vmlinuz",
             initrd_path="/live/initrd.img",
-            kernel_args="boot=live components quiet splash findiso=${iso_path} persistence",
+            kernel_args=(
+                "boot=live components quiet splash findiso=${iso_path} persistence "
+                "persistence-storage=overlay persistence-method=legacy union=aufs"
+            ),
             source="boot/grub/grub.cfg",
             kind="live-persistence",
         )
@@ -443,6 +458,11 @@ menuentry --hotkey=x '... Expert install' {
         self.assertIn("persistence", adapted.kernel_args)
         self.assertIn("persistence-label=KALI-PERSIST", adapted.kernel_args)
         self.assertIn("persistence-media=removable-usb", adapted.kernel_args)
+        self.assertIn("persistence-storage=filesystem", adapted.kernel_args)
+        self.assertIn("union=overlay", adapted.kernel_args)
+        self.assertNotIn("persistence-storage=overlay", adapted.kernel_args)
+        self.assertNotIn("persistence-method=legacy", adapted.kernel_args)
+        self.assertNotIn("union=aufs", adapted.kernel_args)
         self.assertNotIn("findiso=", adapted.kernel_args)
 
     def test_adapt_managed_kali_encrypted_persistence_preserves_encryption_flags(self) -> None:
@@ -460,6 +480,8 @@ menuentry --hotkey=x '... Expert install' {
         self.assertIn("persistent=cryptsetup", adapted.kernel_args)
         self.assertIn("persistence-encryption=luks", adapted.kernel_args)
         self.assertIn("persistence-media=removable-usb", adapted.kernel_args)
+        self.assertIn("persistence-storage=filesystem", adapted.kernel_args)
+        self.assertIn("union=overlay", adapted.kernel_args)
         self.assertNotIn("findiso=", adapted.kernel_args)
 
     def test_adapt_managed_forensics_entry_applies_configured_forensics_extras(self) -> None:
@@ -696,6 +718,8 @@ label live
             self.assertIn("live-media=/dev/disk/by-uuid/dead-beef", resolved["kernel_args"])
             self.assertIn("persistence", resolved["kernel_args"])
             self.assertIn("persistence-label=DEBIAN-PERSIST", resolved["kernel_args"])
+            self.assertIn("persistence-storage=filesystem", resolved["kernel_args"])
+            self.assertIn("union=overlay", resolved["kernel_args"])
 
     def test_resolve_live_boot_uses_configured_debian_persistence_label(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1228,7 +1252,7 @@ label live
             self.assertIn("insmod iso9660", rendered["grub_cfg"])
             self.assertNotIn("insmod ext2", rendered["grub_cfg"])
 
-    def test_render_managed_grub_appends_live_hook_args_only_when_enabled(self) -> None:
+    def test_render_managed_grub_enforces_mandatory_wifi_free_live_hook_args(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             config_path = root / "debian-usb.conf"
@@ -1237,12 +1261,6 @@ label live
                 {
                     "DEFAULT_LIVE_HOOKS": "1",
                     "DEFAULT_LIVE_ARGS_HOOKS": "live-config.hooks=medium",
-                    "DEFAULT_LIVE_WIFI_INTERFACE": "wlan0",
-                    "DEFAULT_LIVE_WIFI_ESSID": "Install Net",
-                    "DEFAULT_LIVE_WIFI_SECURITY": "sae",
-                    "DEFAULT_LIVE_WIFI_CIDR": "192.168.50.45/24",
-                    "DEFAULT_LIVE_WIFI_GATEWAY": "192.168.50.1",
-                    "DEFAULT_LIVE_WIFI_NAMESERVERS": "192.168.50.1,9.9.9.9",
                 },
             )
             (root / "EFI/boot").mkdir(parents=True)
@@ -1257,7 +1275,7 @@ label live
 label live
   menu label Live
   linux /live/vmlinuz
-  append initrd=/live/initrd.img boot=live components quiet live_wifi_psk_b64=cmV0aXJlZA netcfg/wireless_wpa=retired
+  append initrd=/live/initrd.img boot=live components quiet live_wifi_psk_b64=cmV0aXJlZA LIVE_WIFI_ESSID=retired DEFAULT_LIVE_WIFI_GATEWAY=192.0.2.1 netcfg/wireless_essid=retired netcfg/wireless_wpa=retired
 """,
                 encoding="utf-8",
             )
@@ -1271,56 +1289,42 @@ label live
             )
             entries = parse_grub_entries(rendered["grub_cfg"], "boot/grub/grub.cfg")
             live_entry = next(entry for entry in entries if entry.title == "Live")
-            encoded_essid = base64.urlsafe_b64encode(b"Install Net").decode("ascii").rstrip("=")
-            for token in (
-                "live-config.hooks=medium",
-                "live_wifi_interface=wlan0",
-                "live_wifi_security=sae",
-                f"live_wifi_essid_b64={encoded_essid}",
-                "live_wifi_cidr=192.168.50.45/24",
-                "live_wifi_gateway=192.168.50.1",
-                "live_wifi_nameservers=192.168.50.1,9.9.9.9",
-            ):
-                self.assertIn(token, live_entry.kernel_args)
-            self.assertNotIn("live_wifi_psk_b64=", live_entry.kernel_args)
-            self.assertNotIn("netcfg/wireless_wpa=", live_entry.kernel_args)
-            self.assertNotIn("PRESEED_WIFI_PASSPHRASE=", live_entry.kernel_args)
+            self.assertIn("live-config.hooks=medium", live_entry.kernel_args)
+            for token in live_entry.kernel_args.split():
+                key = token.split("=", 1)[0]
+                self.assertFalse(key.startswith("live_wifi_"), token)
+                self.assertFalse(key.startswith("LIVE_WIFI_"), token)
+                self.assertFalse(key.startswith("DEFAULT_LIVE_WIFI_"), token)
+                self.assertFalse(key.startswith("netcfg/wireless_"), token)
 
     def test_live_hook_args_are_limited_to_debian_profile(self) -> None:
         config_data = {
             "DEFAULT_LIVE_HOOKS": "1",
             "DEFAULT_LIVE_ARGS_HOOKS": "live-config.hooks=medium",
-            "DEFAULT_LIVE_WIFI_INTERFACE": "",
-            "DEFAULT_LIVE_WIFI_ESSID": "",
-            "DEFAULT_LIVE_WIFI_SECURITY": "wpa",
-            "DEFAULT_LIVE_WIFI_CIDR": "",
-            "DEFAULT_LIVE_WIFI_GATEWAY": "",
-            "DEFAULT_LIVE_WIFI_NAMESERVERS": "",
         }
 
         self.assertEqual(_live_hook_kernel_args(config_data, "debian"), "live-config.hooks=medium")
+        disabled_config = dict(config_data)
+        disabled_config["DEFAULT_LIVE_HOOKS"] = "0"
+        disabled_config["DEFAULT_LIVE_ARGS_HOOKS"] = "live-config.hooks=filesystem"
+        self.assertEqual(_live_hook_kernel_args(disabled_config, "debian"), "live-config.hooks=medium")
         self.assertEqual(_live_hook_kernel_args(config_data, "kali-linux"), "")
         self.assertEqual(_live_hook_kernel_args(config_data, "tails"), "")
         self.assertEqual(_live_hook_kernel_args(config_data, "ubuntu-desktop"), "")
 
-    def test_live_hook_args_omit_unused_open_network_psk(self) -> None:
+    def test_live_hook_args_strip_all_wifi_transports(self) -> None:
         config_data = {
             "DEFAULT_LIVE_HOOKS": "1",
-            "DEFAULT_LIVE_ARGS_HOOKS": "live-config.hooks=medium live_wifi_psk_b64=MustNotLeak123",
-            "DEFAULT_LIVE_WIFI_INTERFACE": "wlan0",
-            "DEFAULT_LIVE_WIFI_ESSID": "Guest Net",
-            "DEFAULT_LIVE_WIFI_SECURITY": "open",
-            "DEFAULT_LIVE_WIFI_CIDR": "",
-            "DEFAULT_LIVE_WIFI_GATEWAY": "",
-            "DEFAULT_LIVE_WIFI_NAMESERVERS": "",
+            "DEFAULT_LIVE_ARGS_HOOKS": (
+                "live-config.hooks=filesystem debug=1 "
+                "live_wifi_essid_b64=R3Vlc3QgTmV0 LIVE_WIFI_SECURITY=open "
+                "DEFAULT_LIVE_WIFI_INTERFACE=wlan0 netcfg/wireless_essid=retired"
+            ),
         }
 
         rendered = _live_hook_kernel_args(config_data, "debian")
 
-        self.assertIn("live_wifi_essid_b64=R3Vlc3QgTmV0", rendered)
-        self.assertIn("live_wifi_security=open", rendered)
-        self.assertNotIn("live_wifi_psk_b64=", rendered)
-        self.assertNotIn("MustNotLeak123", rendered)
+        self.assertEqual(rendered, "debug=1 live-config.hooks=medium")
 
     def test_render_managed_grub_with_secure_boot_assets_includes_mok_entry(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1983,7 +1987,9 @@ menuentry 'Live system (amd64)' {
             )
             self.assertIn("persistent=cryptsetup", ram_encrypted_entry.kernel_args)
             self.assertIn("persistence-encryption=luks", ram_encrypted_entry.kernel_args)
-            self.assertIn("toram", ram_encrypted_entry.kernel_args)
+            self.assertIn("persistence-storage=filesystem", ram_encrypted_entry.kernel_args)
+            self.assertIn("union=overlay", ram_encrypted_entry.kernel_args)
+            self.assertIn("toram=filesystem.squashfs", ram_encrypted_entry.kernel_args.split())
 
     def test_render_managed_grub_prepared_hd_media_netinst_uses_fs_uuid_search_for_boot_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -162,15 +162,13 @@ func TestPromptLiveToolGroupsPropagatesWorkflowNavigation(t *testing.T) {
 
 func TestApplyLiveHookKernelArgsToBuildPlanIsDebianLiveOnly(t *testing.T) {
 	config := RuntimeConfig{
-		DefaultLiveHooks:        true,
-		DefaultLiveArgsHooks:    "live-config.hooks=medium",
-		DefaultLiveWifiESSID:    "InstallNet",
-		DefaultLiveWifiSecurity: "open",
+		DefaultLiveHooks:     true,
+		DefaultLiveArgsHooks: "live-config.hooks=medium",
 	}
 	livePlan := BuildISOPlan{Distro: buildISODistroDebian, InstallerMode: buildISOInstallerModeLive}
 	applyLiveHookKernelArgsToBuildPlan(config, &livePlan)
-	if !strings.Contains(livePlan.LiveBootAppend, "live-config.hooks=medium") || !strings.Contains(livePlan.LiveBootAppend, "live_wifi_essid_b64=SW5zdGFsbE5ldA") {
-		t.Fatalf("expected Debian Live hook arguments, got %q", livePlan.LiveBootAppend)
+	if livePlan.LiveBootAppend != mandatoryDebianLiveHookKernelArgs {
+		t.Fatalf("expected only mandatory Debian Live hook arguments, got %q", livePlan.LiveBootAppend)
 	}
 
 	netinstPlan := BuildISOPlan{Distro: buildISODistroDebian, InstallerMode: buildISOInstallerModeNetinst}
@@ -186,27 +184,33 @@ func TestApplyLiveHookKernelArgsToBuildPlanIsDebianLiveOnly(t *testing.T) {
 	}
 }
 
-func TestLiveHookKernelArgsOmitUnusedWifiValues(t *testing.T) {
-	missingESSID := RuntimeConfig{
-		DefaultLiveHooks:        true,
-		DefaultLiveArgsHooks:    "live-config.hooks=medium",
-		DefaultLiveWifiSecurity: "wpa",
+func TestLiveHookKernelArgsKeepMandatorySelectorWhenOptionalHooksAreDisabled(t *testing.T) {
+	config := RuntimeConfig{
+		DefaultLiveHooks:     false,
+		DefaultLiveArgsHooks: "live-config.hooks=filesystem live_wifi_essid_b64=MustNotLeak",
 	}
-	if got := liveHookKernelArgsForConfig(missingESSID, profileDebian); got != "live-config.hooks=medium" {
-		t.Fatalf("expected missing ESSID to omit every Wi-Fi argument, got %q", got)
+	if got := liveHookKernelArgsForConfig(config, profileDebian); got != mandatoryDebianLiveHookKernelArgs {
+		t.Fatalf("expected only mandatory Debian Live hook selector, got %q", got)
 	}
+	if got := liveHookKernelArgsForConfig(config, profileKaliLinux); got != "" {
+		t.Fatalf("expected Debian hook selector to stay out of Kali args, got %q", got)
+	}
+}
 
-	openNetwork := RuntimeConfig{
-		DefaultLiveHooks:        true,
-		DefaultLiveArgsHooks:    "live-config.hooks=medium live_wifi_psk_b64=MustNotLeak123",
-		DefaultLiveWifiESSID:    "Guest Net",
-		DefaultLiveWifiSecurity: "open",
+func TestLiveHookKernelArgsStripEveryWifiTransport(t *testing.T) {
+	config := RuntimeConfig{
+		DefaultLiveHooks: true,
+		DefaultLiveArgsHooks: "live-config.hooks=filesystem custom=1 " +
+			"live_wifi_interface=wlan0 live_wifi_essid_b64=SW5zdGFsbE5ldA " +
+			"LIVE_WIFI_PASSPHRASE=MustNotLeak netcfg/wireless_essid=InstallNet",
 	}
-	got := liveHookKernelArgsForConfig(openNetwork, profileDebian)
-	if !strings.Contains(got, "live_wifi_essid_b64=R3Vlc3QgTmV0") || !strings.Contains(got, "live_wifi_security=open") {
-		t.Fatalf("expected open Wi-Fi arguments, got %q", got)
+	got := liveHookKernelArgsForConfig(config, profileDebian)
+	if !strings.Contains(got, "custom=1") || !strings.Contains(got, mandatoryDebianLiveHookKernelArgs) {
+		t.Fatalf("expected non-Wi-Fi hook arguments and mandatory selector, got %q", got)
 	}
-	if strings.Contains(got, "live_wifi_psk_b64=") || strings.Contains(got, "MustNotLeak123") {
-		t.Fatalf("Live Wi-Fi kernel arguments retained a forbidden passphrase transport: %q", got)
+	for _, forbidden := range []string{"live_wifi_", "LIVE_WIFI_", "netcfg/wireless_"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("Live Wi-Fi transport %q survived in kernel args %q", forbidden, got)
+		}
 	}
 }

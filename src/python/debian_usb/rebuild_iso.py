@@ -46,11 +46,16 @@ from .constants import (
 from .initrd_overlay import merge_initrd_overlay
 from .iso_source import _normalize_member_path, open_source
 from .live_hooks import (
+    DEBIAN_LIVE_HOOK_KERNEL_ARGS,
     DEBIAN_LIVE_HOOK_PACKAGES,
+    DEBIAN_LIVE_INITRAMFS_MODULES,
     DEBIAN_LIVE_LANGUAGE,
     DEBIAN_LIVE_LOCALE,
     stage_debian_live_config_hooks,
     stage_debian_live_locale,
+    stage_debian_live_medium_wifi_config,
+    stage_debian_live_wifi_config,
+    stage_live_kernel_module_policy,
     stage_live_systemd_masks,
 )
 from .live_tools import live_tool_packages_for_profile
@@ -133,11 +138,38 @@ LIVE_BOOT_CONFIG_ROOTS = {"boot", "efi", "isolinux", "syslinux"}
 LIVE_KERNEL_ARG_TOKEN_RE = re.compile(r"^[A-Za-z0-9._:+/@${},=-]+$")
 LIVE_WIFI_SECRET_KERNEL_ARG_NAMES = frozenset(
     {
+        "DEFAULT_LIVE_WIFI_INTERFACE",
+        "DEFAULT_LIVE_WIFI_ESSID",
+        "DEFAULT_LIVE_WIFI_SECURITY",
+        "DEFAULT_LIVE_WIFI_CIDR",
+        "DEFAULT_LIVE_WIFI_GATEWAY",
+        "DEFAULT_LIVE_WIFI_NAMESERVERS",
         "DEFAULT_LIVE_WIFI_PSK",
+        "LIVE_WIFI_INTERFACE",
+        "LIVE_WIFI_ESSID",
+        "LIVE_WIFI_SECURITY",
+        "LIVE_WIFI_CIDR",
+        "LIVE_WIFI_GATEWAY",
+        "LIVE_WIFI_NAMESERVERS",
+        "LIVE_WIFI_PASSPHRASE",
         "PRESEED_WIFI_PASSPHRASE",
+        "live_wifi",
+        "live_wifi_enabled",
+        "live_wifi_interface",
+        "live_wifi_iface",
+        "live_wifi_ssid",
+        "live_wifi_essid",
+        "live_wifi_essid_b64",
+        "live_wifi_security",
+        "live_wifi_cidr",
+        "live_wifi_gateway",
+        "live_wifi_nameservers",
         "live_wifi_psk",
         "live_wifi_psk_b64",
         "live_wifi_wpa",
+        "netcfg/choose_interface",
+        "netcfg/wireless_essid",
+        "netcfg/wireless_security_type",
         "netcfg/wireless_wpa",
     }
 )
@@ -225,6 +257,9 @@ def remaster_live_persistence_source(source_iso_path: str, profile: str) -> dict
     ensure_debian_rebuild_deps()
     if profile not in {PROFILE_DEBIAN, PROFILE_KALI_LINUX, PROFILE_TAILS}:
         raise ValueError(f"encrypted persistence remaster is supported only for Debian, Kali Linux, and Tails: {profile}")
+    packages = list(LIVE_PERSISTENCE_SUPPORT_PACKAGES)
+    if profile == PROFILE_DEBIAN:
+        packages = _dedupe([*DEBIAN_LIVE_HOOK_PACKAGES, *packages])
     source_path = _validate_absolute_path(
         source_iso_path,
         allow_missing=False,
@@ -276,6 +311,8 @@ def remaster_live_persistence_source(source_iso_path: str, profile: str) -> dict
             live_initrd_path=live_entry.initrd_path,
             live_initrd_paths=live_initrd_paths,
             live_kernel_path=live_entry.kernel_path,
+            packages=packages,
+            profile=profile,
             iso_root=iso_root,
             workspace_dir=workspace_dir,
             log_file=log_file,
@@ -312,7 +349,7 @@ def remaster_live_persistence_source(source_iso_path: str, profile: str) -> dict
         "workspace_dir": str(workspace_dir),
         "log_path": str(log_path),
         "modified_paths": modified_paths,
-        "packages": list(LIVE_PERSISTENCE_SUPPORT_PACKAGES),
+        "packages": packages,
     }
     manifest_path = state_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -882,6 +919,11 @@ def remaster_live_tools_source(
     normalized_live_kernel_args = _validate_live_kernel_args(live_kernel_args)
     if profile != PROFILE_DEBIAN and normalized_live_kernel_args:
         raise ValueError("Live hook kernel arguments are supported only for Debian Live remasters")
+    if profile == PROFILE_DEBIAN:
+        normalized_live_kernel_args = _merge_live_kernel_line(
+            normalized_live_kernel_args,
+            " ".join(DEBIAN_LIVE_HOOK_KERNEL_ARGS),
+        )
     run_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
     requested_output_dir = output_dir or str(DEFAULT_REBUILD_OUTPUT_DIR / "live-tools" / run_id)
     source_path = _validate_absolute_path(
@@ -909,6 +951,9 @@ def remaster_live_tools_source(
     live_rootfs_path = _find_existing_member(source, LIVE_ROOTFS_CANDIDATES)
     if not live_entry or not live_rootfs_path:
         raise RuntimeError("The selected source ISO does not expose a supported live entry and root filesystem.")
+    if profile == PROFILE_DEBIAN and (not live_entry.kernel_path or not live_entry.initrd_path):
+        raise RuntimeError("Debian Live tool remastering requires live kernel and initrd paths.")
+    live_initrd_paths = _collect_live_entry_member_paths(entries, "initrd_path")
     if not live_rootfs_path.endswith(".squashfs"):
         raise RuntimeError(f"Live administration tool remaster requires squashfs media, got {live_rootfs_path}")
     architecture = _infer_architecture(entries, live_entry.kernel_path, live_entry.initrd_path)
@@ -960,6 +1005,9 @@ def remaster_live_tools_source(
             )
             modified_paths = _apply_live_tools_remaster(
                 live_rootfs_path=live_rootfs_path,
+                live_initrd_path=live_entry.initrd_path,
+                live_initrd_paths=live_initrd_paths,
+                live_kernel_path=live_entry.kernel_path,
                 packages=packages,
                 profile=profile,
                 iso_root=iso_root,
@@ -1054,8 +1102,8 @@ def _validate_live_kernel_args(value: str) -> str:
             raise ValueError(f"invalid Live kernel argument token: {token}")
         if token.split("=", 1)[0] in LIVE_WIFI_SECRET_KERNEL_ARG_NAMES:
             raise ValueError(
-                "Live Wi-Fi passphrase kernel arguments are forbidden; "
-                "use initrd/debian/live/live.env"
+                "Live Wi-Fi kernel arguments are forbidden; "
+                "use LIVE_WIFI_* assignments in initrd/debian/live/live.env"
             )
     return normalized
 
@@ -1120,6 +1168,25 @@ def _patch_live_boot_configs(iso_root: Path, live_kernel_args: str) -> list[str]
     return modified_paths
 
 
+def _stage_debian_live_iso_policy(iso_root: Path) -> list[str]:
+    staged_hooks = stage_debian_live_config_hooks(iso_root / "live")
+    staged_wifi = stage_debian_live_medium_wifi_config(iso_root / "live")
+    staged_paths = [
+        "/" + path.relative_to(iso_root).as_posix()
+        for path in [*staged_hooks, staged_wifi]
+    ]
+    boot_paths = _patch_live_boot_configs(
+        iso_root,
+        " ".join(DEBIAN_LIVE_HOOK_KERNEL_ARGS),
+    )
+    return _dedupe([*staged_paths, *boot_paths])
+
+
+def _stage_debian_live_root_policy(live_root: Path) -> None:
+    stage_live_kernel_module_policy(live_root, DEBIAN_LIVE_INITRAMFS_MODULES)
+    stage_debian_live_wifi_config(live_root)
+
+
 def rebuild_debian_installer_iso(plan_path: str) -> dict[str, Any]:
     ensure_debian_rebuild_deps()
     plan = _validate_rebuild_plan(_load_json_file(Path(plan_path)))
@@ -1152,6 +1219,7 @@ def rebuild_debian_installer_iso(plan_path: str) -> dict[str, Any]:
         else:
             action_result = _apply_live_host_rebuild_action(plan, inspection, iso_root, workspace_dir, state_dir, log_file)
         modified_paths = action_result["modified_paths"]
+        live_host_packages = list(action_result.get("packages", []))
         if action_result.get("staged_udeb_repo_path"):
             staged_udeb_repo_path = action_result["staged_udeb_repo_path"]
         warnings.extend(action_result.get("warnings", []))
@@ -1192,9 +1260,11 @@ def rebuild_debian_installer_iso(plan_path: str) -> dict[str, Any]:
         "modified_paths": modified_paths,
         "warnings": warnings,
     }
+    if plan["scope"] == "live-host":
+        manifest["packages"] = live_host_packages
     manifest_path = state_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    return {
+    result = {
         "run_id": run_id,
         "iso_path": str(final_iso_path),
         "workspace_dir": str(workspace_dir),
@@ -1204,6 +1274,9 @@ def rebuild_debian_installer_iso(plan_path: str) -> dict[str, Any]:
         "modified_paths": modified_paths,
         "warnings": warnings,
     }
+    if plan["scope"] == "live-host":
+        result["packages"] = live_host_packages
+    return result
 
 
 def _apply_installer_rebuild_action(
@@ -1307,14 +1380,23 @@ def _apply_live_host_rebuild_action(
     state_dir: Path,
     log_file: Any,
 ) -> dict[str, Any]:
+    del state_dir
     live_rootfs_path = str(inspection.get("live_rootfs_path") or "").strip()
     live_kernel_path = str(inspection.get("live_kernel_path") or "").strip()
     live_initrd_path = str(inspection.get("live_initrd_path") or "").strip()
-    live_kernel_paths = _coerce_member_path_list(inspection.get("live_kernel_paths"), fallback=[live_kernel_path] if live_kernel_path else [])
-    live_initrd_paths = _coerce_member_path_list(inspection.get("live_initrd_paths"), fallback=[live_initrd_path] if live_initrd_path else [])
+    live_kernel_paths = _coerce_member_path_list(
+        inspection.get("live_kernel_paths"),
+        fallback=[live_kernel_path] if live_kernel_path else [],
+    )
+    live_initrd_paths = _coerce_member_path_list(
+        inspection.get("live_initrd_paths"),
+        fallback=[live_initrd_path] if live_initrd_path else [],
+    )
     architecture = str(plan["architecture"] or inspection.get("architecture") or "").strip()
     if not live_rootfs_path:
         raise RuntimeError("The selected source ISO does not expose a Debian live root filesystem.")
+    if not live_kernel_path or not live_initrd_path:
+        raise RuntimeError("The selected source ISO does not expose Debian Live kernel and initrd paths.")
     if not live_rootfs_path.endswith(".squashfs"):
         raise RuntimeError(f"Live Host actions currently require squashfs media, got {live_rootfs_path}")
     if architecture and architecture != _host_architecture():
@@ -1331,34 +1413,48 @@ def _apply_live_host_rebuild_action(
         log_file=log_file,
     )
     stage_live_systemd_masks(live_root)
+    _stage_debian_live_root_policy(live_root)
     warnings: list[str] = []
     modified_paths = [live_rootfs_path]
 
     if plan["action"] == "add-deb-packages":
-        _install_packages_in_chroot(live_root, plan["live_deb_packages"], log_file, apt_source_root=iso_root)
+        installed_packages = _dedupe([*DEBIAN_LIVE_HOOK_PACKAGES, *plan["live_deb_packages"]])
+        target_kernel_version = ""
     elif plan["action"] == "replace-kernel":
         target_kernel_version = plan["target_kernel_version"]
-        _install_packages_in_chroot(
-            live_root,
-            [f"linux-image-{target_kernel_version}", f"linux-headers-{target_kernel_version}"],
-            log_file,
-            apt_source_root=iso_root,
+        installed_packages = _dedupe(
+            [
+                *DEBIAN_LIVE_HOOK_PACKAGES,
+                f"linux-image-{target_kernel_version}",
+                f"linux-headers-{target_kernel_version}",
+            ]
         )
-        with _mounted_chroot(live_root, log_file):
-            _run_in_chroot(
-                live_root,
-                _chroot_noninteractive_command("update-initramfs", "-c", "-k", target_kernel_version),
-                log_file,
-            )
-        _prune_live_kernel_versions(live_root, target_kernel_version)
-        if not live_kernel_path or not live_initrd_path:
-            raise RuntimeError("The selected source ISO does not expose live kernel and initrd paths.")
-        rebuilt_kernel = _resolve_live_root_kernel_file(live_root, target_kernel_version)
-        rebuilt_initrd = _resolve_live_root_initrd_file(live_root, target_kernel_version)
-        modified_paths.extend(_copy_file_to_member_paths(rebuilt_kernel, iso_root, live_kernel_paths))
-        modified_paths.extend(_copy_file_to_member_paths(rebuilt_initrd, iso_root, live_initrd_paths))
     else:
         raise RuntimeError(f"unsupported live host rebuild action: {plan['action']}")
+
+    _install_packages_in_chroot(
+        live_root,
+        installed_packages,
+        log_file,
+        apt_source_root=iso_root,
+    )
+    with _mounted_chroot(live_root, log_file):
+        _run_in_chroot(
+            live_root,
+            _chroot_noninteractive_command("update-initramfs", "-u", "-k", "all"),
+            log_file,
+        )
+
+    if target_kernel_version:
+        kernel_version = target_kernel_version
+        _prune_live_kernel_versions(live_root, kernel_version)
+        rebuilt_kernel = _resolve_live_root_kernel_file(live_root, kernel_version)
+        modified_paths.extend(_copy_file_to_member_paths(rebuilt_kernel, iso_root, live_kernel_paths))
+    else:
+        kernel_version = _detect_live_root_kernel_version(live_root, live_kernel_path)
+    rebuilt_initrd = _resolve_live_root_initrd_file(live_root, kernel_version)
+    modified_paths.extend(_copy_file_to_member_paths(rebuilt_initrd, iso_root, live_initrd_paths))
+    modified_paths.extend(_stage_debian_live_iso_policy(iso_root))
 
     stage_live_systemd_masks(live_root)
     _refresh_live_metadata(live_root, iso_root, live_rootfs_path)
@@ -1378,7 +1474,12 @@ def _apply_live_host_rebuild_action(
         cwd=workspace_dir,
         log_file=log_file,
     )
-    return {"modified_paths": _dedupe(modified_paths), "staged_udeb_repo_path": "", "warnings": warnings}
+    return {
+        "modified_paths": _dedupe(modified_paths),
+        "packages": installed_packages,
+        "staged_udeb_repo_path": "",
+        "warnings": warnings,
+    }
 
 
 def _apply_live_persistence_remaster(
@@ -1387,6 +1488,8 @@ def _apply_live_persistence_remaster(
     live_initrd_path: str,
     live_initrd_paths: list[str],
     live_kernel_path: str,
+    packages: list[str],
+    profile: str,
     iso_root: Path,
     workspace_dir: Path,
     log_file: Any,
@@ -1400,7 +1503,9 @@ def _apply_live_persistence_remaster(
         log_file=log_file,
     )
     stage_live_systemd_masks(live_root)
-    _install_packages_in_chroot(live_root, list(LIVE_PERSISTENCE_SUPPORT_PACKAGES), log_file, apt_source_root=iso_root)
+    if profile == PROFILE_DEBIAN:
+        _stage_debian_live_root_policy(live_root)
+    _install_packages_in_chroot(live_root, packages, log_file, apt_source_root=iso_root)
     with _mounted_chroot(live_root, log_file):
         _run_in_chroot(
             live_root,
@@ -1415,6 +1520,7 @@ def _apply_live_persistence_remaster(
         iso_root,
         _coerce_member_path_list(live_initrd_paths, fallback=[live_initrd_path]),
     )
+    policy_paths = _stage_debian_live_iso_policy(iso_root) if profile == PROFILE_DEBIAN else []
     _refresh_live_metadata(live_root, iso_root, live_rootfs_path)
     compression = _squashfs_compression(extracted_rootfs, processors=processors)
     extracted_rootfs.unlink()
@@ -1432,12 +1538,15 @@ def _apply_live_persistence_remaster(
         cwd=workspace_dir,
         log_file=log_file,
     )
-    return _dedupe([live_rootfs_path, *modified_initrd_paths])
+    return _dedupe([live_rootfs_path, *modified_initrd_paths, *policy_paths])
 
 
 def _apply_live_tools_remaster(
     *,
     live_rootfs_path: str,
+    live_initrd_path: str,
+    live_initrd_paths: list[str],
+    live_kernel_path: str,
     packages: list[str],
     profile: str,
     iso_root: Path,
@@ -1456,15 +1565,31 @@ def _apply_live_tools_remaster(
     stage_live_systemd_masks(live_root)
     if profile == PROFILE_DEBIAN:
         stage_debian_live_locale(live_root)
+        _stage_debian_live_root_policy(live_root)
     _install_packages_in_chroot(live_root, packages, log_file, apt_source_root=iso_root)
     stage_live_systemd_masks(live_root)
+
+    modified_initrd_paths: list[str] = []
     if profile == PROFILE_DEBIAN:
         stage_debian_live_locale(live_root)
         _configure_debian_live_locale(live_root, log_file)
+        with _mounted_chroot(live_root, log_file):
+            _run_in_chroot(
+                live_root,
+                _chroot_noninteractive_command("update-initramfs", "-u", "-k", "all"),
+                log_file,
+            )
+        kernel_version = _detect_live_root_kernel_version(live_root, live_kernel_path)
+        rebuilt_initrd = _resolve_live_root_initrd_file(live_root, kernel_version)
+        modified_initrd_paths = _copy_file_to_member_paths(
+            rebuilt_initrd,
+            iso_root,
+            _coerce_member_path_list(live_initrd_paths, fallback=[live_initrd_path]),
+        )
+
     hook_paths: list[str] = []
     if profile == PROFILE_DEBIAN:
-        staged_hooks = stage_debian_live_config_hooks(iso_root / "live")
-        hook_paths = ["/" + path.relative_to(iso_root).as_posix() for path in staged_hooks]
+        hook_paths = _stage_debian_live_iso_policy(iso_root)
     _refresh_live_metadata(live_root, iso_root, live_rootfs_path)
     compression = _squashfs_compression(extracted_rootfs, processors=processor_count)
     extracted_rootfs.unlink()
@@ -1482,7 +1607,7 @@ def _apply_live_tools_remaster(
         cwd=workspace_dir,
         log_file=log_file,
     )
-    return _dedupe([live_rootfs_path, *hook_paths])
+    return _dedupe([live_rootfs_path, *modified_initrd_paths, *hook_paths])
 
 
 def _build_installer_kernel_udebs(

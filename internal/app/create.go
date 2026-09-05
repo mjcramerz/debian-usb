@@ -635,9 +635,30 @@ func (a *App) promptAndApplyLiveInitrdOverlay(
 	sourcePath string,
 	inspection ISOInspection,
 ) (string, ISOInspection, menuAction, error) {
-	overlayDir, action, err := a.promptInitrdOverlayContent(spec, multiOSSourceRolePrimary, inspection.MediaClass)
-	if err != nil || action != menuStay || overlayDir == "" {
-		return sourcePath, inspection, action, err
+	overlayDir := ""
+	action := menuStay
+	var err error
+	if spec.Key == profileDebian && isLiveCapableMedia(inspection.MediaClass) {
+		if a.backend == nil || strings.TrimSpace(a.backend.initrdRoot) == "" {
+			return sourcePath, inspection, menuStay, fmt.Errorf("Debian Live requires the managed initrd overlay root")
+		}
+		overlayDir, err = resolveOptionalExistingDir(filepath.Join(a.backend.initrdRoot, "debian", "live"))
+		if err == nil && overlayDir == "" {
+			err = fmt.Errorf("required Debian Live initrd overlay is missing")
+		}
+		if err != nil {
+			return sourcePath, inspection, menuStay, err
+		}
+		printSection(
+			"Required Debian Live Initrd Content",
+			infoRow{Label: "Source", Value: overlayDir},
+			infoRow{Label: "Target", Value: "/ in every selected Debian Live initrd"},
+		)
+	} else {
+		overlayDir, action, err = a.promptInitrdOverlayContent(spec, multiOSSourceRolePrimary, inspection.MediaClass)
+		if err != nil || action != menuStay || overlayDir == "" {
+			return sourcePath, inspection, action, err
+		}
 	}
 	remasteredPath, err := a.backend.RemasterLiveInitrdSource(spec.Key, sourcePath, overlayDir)
 	if err != nil {

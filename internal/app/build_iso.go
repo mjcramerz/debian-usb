@@ -16,11 +16,30 @@ const (
 )
 
 var (
-	defaultBuildISOArchiveAreas             = []string{"main", "contrib", "non-free", "non-free-firmware"}
-	defaultBuildISOBasePackages             = []string{"live-boot", "live-boot-initramfs-tools", "live-config", "live-config-systemd", "live-tools", "live-task-base", "live-task-standard", "live-task-recommended"}
-	defaultBuildISOInitramfsModules         = []string{"erofs", "xxhash", "xxhash_generic"}
-	defaultBuildISOKernelConfigSymbols      = []string{"CONFIG_EROFS_FS", "CONFIG_EROFS_FS_XATTR", "CONFIG_EROFS_FS_ZIP", "CONFIG_XXHASH", "CONFIG_CRYPTO_XXHASH"}
-	defaultBuildISOModuleAliases            = []string{"xxhash64", "xxhash64-generic", "xxhash_generic", "crypto-xxhash64", "crypto-xxhash64-generic", "crypto_xxhash64", "crypto_xxhash64_generic"}
+	defaultBuildISOArchiveAreas = []string{"main", "contrib", "non-free", "non-free-firmware"}
+	defaultBuildISOBasePackages = []string{
+		"live-boot", "live-boot-initramfs-tools", "live-config", "live-config-systemd", "live-tools",
+		"live-task-base", "live-task-standard", "live-task-recommended", "ca-certificates", "debian-archive-keyring",
+		"locales", "initramfs-tools", "kmod", "xxhash", "lz4", "zstd", "usbutils", "pciutils", "flashrom",
+		"i2c-tools", "iproute2", "iw", "wpasupplicant", "dhcpcd-base", "rfkill", "wireless-regdb",
+		"bluez-firmware", "firmware-linux", "firmware-iwlwifi", "firmware-ipw2x00", "firmware-intel-graphics",
+		"firmware-intel-misc", "firmware-intel-sound", "firmware-sof-signed", "intel-microcode", "firmware-atheros",
+		"firmware-realtek", "firmware-brcm80211", "firmware-mediatek", "firmware-libertas",
+	}
+	defaultBuildISOInitramfsModules = []string{
+		"erofs", "xxhash", "xxhash_generic", "lz4", "lz4_compress", "lz4_decompress", "loop", "squashfs",
+		"overlay", "ext4", "dm_mod", "dm_crypt", "usb_storage", "uas", "nvme", "usbserial", "ch341",
+	}
+	defaultBuildISOKernelConfigSymbols = []string{
+		"CONFIG_EROFS_FS", "CONFIG_EROFS_FS_XATTR", "CONFIG_EROFS_FS_ZIP", "CONFIG_XXHASH", "CONFIG_CRYPTO_XXHASH",
+		"CONFIG_CRYPTO_LZ4", "CONFIG_LZ4_COMPRESS", "CONFIG_LZ4_DECOMPRESS", "CONFIG_BLK_DEV_LOOP", "CONFIG_SQUASHFS",
+		"CONFIG_OVERLAY_FS", "CONFIG_EXT4_FS", "CONFIG_BLK_DEV_DM", "CONFIG_DM_CRYPT", "CONFIG_USB_STORAGE",
+		"CONFIG_USB_UAS", "CONFIG_BLK_DEV_NVME", "CONFIG_USB_SERIAL", "CONFIG_USB_SERIAL_CH341",
+	}
+	defaultBuildISOModuleAliases = []string{
+		"xxhash64", "xxhash64-generic", "xxhash64_generic", "xxhash_generic", "crypto-xxhash64",
+		"crypto-xxhash64-generic", "crypto_xxhash64", "crypto_xxhash64_generic",
+	}
 	defaultBuildISOEROFSInstallerComponents = []string{"build-config", "kernel-wedge", "iso-scan", "partman-auto", "partconf", "os-prober", "rescue"}
 )
 
@@ -331,6 +350,10 @@ func (a *App) collectDebianBuildISOPlan() (BuildISOPlan, menuAction, error) {
 		EROFSCompressor:          "zstd",
 		EROFSInstallerPolicy:     buildISOEROFSInstallerPolicyRequire,
 		EROFSInstallerComponents: append([]string{}, defaultBuildISOEROFSInstallerComponents...),
+		LiveBootAppend:           mandatoryDebianLiveHookKernelArgs,
+		InitramfsModules:         append([]string{}, defaultBuildISOInitramfsModules...),
+		KernelInspectionModules:  append([]string{}, defaultBuildISOInitramfsModules...),
+		KernelConfigSymbols:      append([]string{}, defaultBuildISOKernelConfigSymbols...),
 		ModuleAliasCandidates:    append([]string{}, defaultBuildISOModuleAliases...),
 	}
 	repoManagedSpecsEnabled := false
@@ -763,6 +786,8 @@ func (a *App) collectDebianBuildISOPlan() (BuildISOPlan, menuAction, error) {
 		plan.LiveBootAppend = ""
 		plan.FilesystemModuleEntries = nil
 		plan.InitramfsModules = nil
+		plan.KernelInspectionModules = nil
+		plan.KernelConfigSymbols = nil
 		plan.StorageToolPackages = nil
 		plan.IncludeInstallerLauncher = false
 		plan.KernelMode = buildISOKernelModeStockDebian
@@ -837,7 +862,10 @@ func (a *App) collectDebianBuildISOPlan() (BuildISOPlan, menuAction, error) {
 		} else {
 			plan.LiveModuleSpecPath = ""
 			plan.DIModuleSpecPath = ""
-			moduleInput, err := a.promptOptionalString("Optional extra initramfs modules to include early (optional)")
+			moduleInput, err := a.promptEditableOptionalString(
+				"Initramfs modules to include early",
+				strings.Join(defaultBuildISOInitramfsModules, " "),
+			)
 			if err != nil {
 				return plan, menuStay, err
 			}

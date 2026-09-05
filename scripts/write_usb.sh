@@ -454,8 +454,12 @@ duw_rebuild_raw_iso_with_managed_uefi_redirect() (
   done
   live_hooks_dir=$(duw_collect_live_hook_map_args "${source_iso}" "${profile}")
   if [ -n "${live_hooks_dir}" ]; then
+    live_env_path=$(duw_live_env_source_path)
+    duw_validate_live_env_file "${live_env_path}"
     set -- "$@" -map "${live_hooks_dir}" /live/config-hooks \
-      -chmod 0755 /live/config-hooks/0500-apt-live-medium.sh /live/config-hooks/1000-network-wifi.sh --
+      -chmod 0755 /live/config-hooks/0500-apt-live-medium.sh /live/config-hooks/1000-network-wifi.sh -- \
+      -map "${live_env_path}" /live/debian-usb-live.env \
+      -chmod 0600 /live/debian-usb-live.env --
   fi
   set -- "$@" -commit -end
   duw_step "Embedding managed UEFI menu redirect into raw ISO payload ${source_iso}"
@@ -471,10 +475,6 @@ duw_rebuild_raw_iso_with_managed_uefi_redirect() (
   fi
 )
 
-duw_live_hooks_enabled() {
-  [ "${DEFAULT_LIVE_HOOKS:-0}" = 1 ]
-}
-
 duw_live_hooks_source_dir() (
   if [ -n "${DEBIAN_USB_LIVE_HOOKS_DIR:-}" ]; then
     [ -d "${DEBIAN_USB_LIVE_HOOKS_DIR}" ] || duw_die "DEBIAN_USB_LIVE_HOOKS_DIR is not a directory: ${DEBIAN_USB_LIVE_HOOKS_DIR}"
@@ -485,7 +485,55 @@ duw_live_hooks_source_dir() (
   for candidate in "${script_dir}/../config-hooks" "${script_dir}/config-hooks"; do
     if [ -d "${candidate}" ]; then printf '%s\n' "${candidate}"; return 0; fi
   done
-  duw_die "DEFAULT_LIVE_HOOKS=1 but no live config hook directory was found"
+  duw_die "required Debian Live config hook directory was not found"
+)
+
+duw_live_env_source_path() (
+  if [ -n "${DEBIAN_USB_LIVE_ENV_PATH:-}" ]; then
+    case ${DEBIAN_USB_LIVE_ENV_PATH} in /*) ;; *) duw_die "DEBIAN_USB_LIVE_ENV_PATH must be absolute" ;; esac
+    [ -f "${DEBIAN_USB_LIVE_ENV_PATH}" ] && [ ! -L "${DEBIAN_USB_LIVE_ENV_PATH}" ] || \
+      duw_die "DEBIAN_USB_LIVE_ENV_PATH is not a regular file"
+    printf '%s\n' "${DEBIAN_USB_LIVE_ENV_PATH}"
+    return 0
+  fi
+  script_dir=$(CDPATH='' cd -P "$(dirname "$0")" && pwd -P)
+  if [ -n "${INITRD_DIR:-}" ]; then
+    set -- "${INITRD_DIR}/debian/live/live.env"
+  else
+    set --
+  fi
+  set -- "$@" \
+    "${script_dir}/../initrd/debian/live/live.env" \
+    "${script_dir}/initrd/debian/live/live.env" \
+    /usr/lib/debian-usb/initrd/debian/live/live.env
+  for candidate in "$@"; do
+    [ -f "${candidate}" ] && [ ! -L "${candidate}" ] || continue
+    printf '%s\n' "${candidate}"
+    return 0
+  done
+  duw_die "required Debian Live environment file was not found"
+)
+
+duw_validate_live_env_file() (
+  live_env_path=$1
+  helper=$(duw_python_helper_path)
+  if duw_run_python_helper "${helper}" validate-live-wifi-config --path "${live_env_path}" >/dev/null 2>&1; then
+    return 0
+  fi
+  duw_die "Debian Live environment validation failed: ${live_env_path}"
+)
+
+duw_preflight_debian_live_env_for_raw_payload() (
+  profile=$1
+  source_role=$2
+  media_class=$3
+  payload_layout=$4
+  [ "${profile}" = debian ] || return 0
+  [ "${source_role}" = primary ] || return 0
+  [ "${payload_layout}" = raw-iso ] || return 0
+  case ${media_class} in live|hybrid) ;; *) return 0 ;; esac
+  live_env_path=$(duw_live_env_source_path)
+  duw_validate_live_env_file "${live_env_path}"
 )
 
 duw_raw_iso_has_live_hook_target() (
@@ -498,10 +546,9 @@ duw_raw_iso_has_live_hook_target() (
 duw_collect_live_hook_map_args() (
   source_iso=$1
   profile=$2
-  duw_live_hooks_enabled || return 0
   case ${profile} in debian) ;; *) return 0 ;; esac
   if ! duw_raw_iso_has_live_hook_target "${source_iso}"; then
-    duw_note "DEFAULT_LIVE_HOOKS=1 but ${source_iso} does not expose a /live payload; skipping live config hooks" >&2
+    duw_note "${source_iso} does not expose a /live payload; skipping Debian Live config hooks" >&2
     return 0
   fi
   hooks_dir=$(duw_live_hooks_source_dir)
@@ -775,10 +822,6 @@ duw_load_config() {
       DEFAULT_PERSISTENCE_SIZE_GIB) DEFAULT_PERSISTENCE_SIZE_GIB=${_duw_value} ;;
       DEFAULT_LIVE_HOOKS) DEFAULT_LIVE_HOOKS=${_duw_value} ;;
       DEFAULT_LIVE_ARGS_HOOKS) DEFAULT_LIVE_ARGS_HOOKS=${_duw_value} ;;
-      DEFAULT_LIVE_WIFI_SECURITY) DEFAULT_LIVE_WIFI_SECURITY=${_duw_value} ;;
-      DEFAULT_LIVE_WIFI_CIDR) DEFAULT_LIVE_WIFI_CIDR=${_duw_value} ;;
-      DEFAULT_LIVE_WIFI_GATEWAY) DEFAULT_LIVE_WIFI_GATEWAY=${_duw_value} ;;
-      DEFAULT_LIVE_WIFI_NAMESERVERS) DEFAULT_LIVE_WIFI_NAMESERVERS=${_duw_value} ;;
       DEFAULT_ESP_LABEL) DEFAULT_ESP_LABEL=${_duw_value} ;;
       DEFAULT_MULTI_DATA_LABEL) DEFAULT_MULTI_DATA_LABEL=${_duw_value} ;;
       DEFAULT_DEBIAN_LIVE_LABEL) DEFAULT_DEBIAN_LIVE_LABEL=${_duw_value} ;;
@@ -804,14 +847,10 @@ duw_load_config() {
       PRESEED_HOST_PURPLE_PATH) PRESEED_HOST_PURPLE_PATH=${_duw_value} ;;
     esac
   done <"${_duw_config_path}"
-  # These values are consumed by the Python GRUB renderer from the same config file.
-  : "${DEFAULT_LIVE_ARGS_HOOKS:-}" "${DEFAULT_LIVE_WIFI_CIDR:-}" "${DEFAULT_LIVE_WIFI_GATEWAY:-}" "${DEFAULT_LIVE_WIFI_NAMESERVERS:-}"
+  # Optional non-Wi-Fi Live hook arguments are consumed by the Python GRUB renderer.
+  : "${DEFAULT_LIVE_ARGS_HOOKS:-}"
   [ -n "${DEFAULT_PERSISTENCE_SIZE_GIB:-}" ] || duw_die "DEFAULT_PERSISTENCE_SIZE_GIB is required"
   case ${DEFAULT_LIVE_HOOKS:-} in 0|1) ;; *) duw_die "DEFAULT_LIVE_HOOKS must be 0 or 1" ;; esac
-  if duw_live_hooks_enabled; then
-    [ -n "${DEFAULT_LIVE_WIFI_SECURITY:-}" ] || duw_die "DEFAULT_LIVE_WIFI_SECURITY is required when DEFAULT_LIVE_HOOKS=1"
-    case ${DEFAULT_LIVE_WIFI_SECURITY} in open|wpa|sae) ;; *) duw_die "DEFAULT_LIVE_WIFI_SECURITY must be one of: open, wpa, sae" ;; esac
-  fi
 
   DEFAULT_ESP_LABEL=$(duw_config_label_value DEFAULT_ESP_LABEL ESPBOOT)
   DEFAULT_MULTI_DATA_LABEL=$(duw_config_label_value DEFAULT_MULTI_DATA_LABEL MULTIBOOT)
@@ -4368,6 +4407,8 @@ duw_build_managed_usb() (
   if [ "${source_role}" = "netinst" ] || [ "${source_role}" = "netboot" ]; then
     payload_layout="iso-store"
   fi
+  duw_preflight_debian_live_env_for_raw_payload \
+    "${profile}" "${source_role}" "${DUSB_INSPECTED_MEDIA_CLASS}" "${payload_layout}"
   payload_fs_label="$(duw_profile_payload_fs_label "${profile}" "${source_role}" "${DUSB_INSPECTED_MEDIA_CLASS}")"
   payload_partlabel="$(duw_profile_payload_partlabel "${profile}" "${source_role}" "${DUSB_INSPECTED_MEDIA_CLASS}")"
   payload_iso_volid="$(duw_profile_payload_iso_volid "${profile}" "${source_role}" "${DUSB_INSPECTED_MEDIA_CLASS}")"
@@ -4628,6 +4669,8 @@ duw_build_multios_usb() (
       duw_inspect_managed_media "${profile}" "${payload_write_iso}" "${config_path}" "${use_custom_grub_menu}" "${source_role}"
     fi
     media_class=${DUSB_INSPECTED_MEDIA_CLASS}
+    duw_preflight_debian_live_env_for_raw_payload \
+      "${profile}" "${source_role}" "${media_class}" "${layout}"
     iso_bytes=$(stat -c '%s' "${payload_write_iso}")
     iso_mib=$(duw_bytes_to_mib "${iso_bytes}")
     required_mib=$((iso_mib + $(duw_raw_iso_managed_uefi_overhead_mib)))

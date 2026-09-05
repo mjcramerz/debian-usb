@@ -33,6 +33,126 @@ class LiveRootPolicyTests(unittest.TestCase):
                 self.assertTrue(mask_path.is_symlink())
                 self.assertEqual(mask_path.readlink(), Path("/dev/null"))
 
+    def test_kernel_module_policy_stages_initramfs_and_runtime_loading(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            staged = live_hooks.stage_live_kernel_module_policy(
+                root,
+                ["xxhash", "xxhash_generic", "lz4", "xxhash"],
+            )
+            live_hooks.stage_live_kernel_module_policy(
+                root,
+                ["xxhash", "xxhash_generic", "lz4", "xxhash"],
+            )
+
+            self.assertEqual(
+                staged,
+                [
+                    root / "usr/share/initramfs-tools/modules.d/debian-usb-live",
+                    root / "usr/share/initramfs-tools/conf.d/debian-usb-live",
+                    root / "etc/modules-load.d/debian-usb-live.conf",
+                ],
+            )
+            expected_modules = "xxhash\nxxhash_generic\nlz4\n"
+            self.assertEqual(staged[0].read_text(encoding="utf-8"), expected_modules)
+            self.assertEqual(staged[1].read_text(encoding="utf-8"), "MODULES=most\n")
+            self.assertEqual(staged[2].read_text(encoding="utf-8"), expected_modules)
+            self.assertEqual([path.stat().st_mode & 0o777 for path in staged], [0o644, 0o644, 0o644])
+
+    def test_live_wifi_config_is_validated_and_staged_privately(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "source-live.env"
+            source.write_text(
+                "\n".join(
+                    [
+                        "LIVE_WIFI_INTERFACE='wlan0'",
+                        "LIVE_WIFI_ESSID='Install Net'",
+                        "LIVE_WIFI_SECURITY='wpa'",
+                        "LIVE_WIFI_CIDR='192.0.2.44/24'",
+                        "LIVE_WIFI_GATEWAY='192.0.2.1'",
+                        "LIVE_WIFI_NAMESERVERS='192.0.2.53 198.51.100.53 192.0.2.53'",
+                        "LIVE_WIFI_PASSPHRASE='123456789222aER$'",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            source.chmod(0o600)
+
+            config = live_hooks.load_debian_live_wifi_config(source)
+            self.assertEqual(config["LIVE_WIFI_INTERFACE"], "wlan0")
+            self.assertEqual(config["LIVE_WIFI_ESSID"], "Install Net")
+            self.assertEqual(config["LIVE_WIFI_NAMESERVERS"], "192.0.2.53,198.51.100.53")
+            self.assertEqual(config["LIVE_WIFI_PASSPHRASE"], "123456789222aER$")
+
+            live_root = root / "live-root"
+            live_medium = root / "iso-root/live"
+            root_config = live_hooks.stage_debian_live_wifi_config(live_root, source)
+            medium_config = live_hooks.stage_debian_live_medium_wifi_config(live_medium, source)
+            self.assertEqual(root_config, live_root / "etc/debian-usb/live.env")
+            self.assertEqual(medium_config, live_medium / "debian-usb-live.env")
+            for staged in (root_config, medium_config):
+                rendered = staged.read_text(encoding="utf-8")
+                self.assertIn("LIVE_WIFI_ESSID='Install Net'", rendered)
+                self.assertIn("LIVE_WIFI_PASSPHRASE='123456789222aER$'", rendered)
+                self.assertNotIn("PRESEED_WIFI_PASSPHRASE", rendered)
+                self.assertEqual(staged.stat().st_mode & 0o777, 0o600)
+
+    def test_live_wifi_config_rejects_legacy_unknown_duplicate_and_insecure_secret_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            cases = {
+                "legacy": "PRESEED_WIFI_PASSPHRASE='SafePass123'\n",
+                "unknown": "LIVE_WIFI_ESSID='Net'\nUNRELATED='value'\n",
+                "duplicate": "LIVE_WIFI_ESSID='one'\nLIVE_WIFI_ESSID='two'\n",
+            }
+            for name, content in cases.items():
+                with self.subTest(name=name):
+                    source = root / f"{name}.env"
+                    source.write_text(content, encoding="utf-8")
+                    source.chmod(0o600)
+                    with self.assertRaises(ValueError):
+                        live_hooks.load_debian_live_wifi_config(source)
+
+            insecure = root / "insecure.env"
+            insecure.write_text(
+                "LIVE_WIFI_ESSID='Net'\nLIVE_WIFI_SECURITY='wpa'\nLIVE_WIFI_PASSPHRASE='SafePass123'\n",
+                encoding="utf-8",
+            )
+            insecure.chmod(0o644)
+            with self.assertRaisesRegex(ValueError, "mode 0600"):
+                live_hooks.load_debian_live_wifi_config(insecure)
+
+    def test_live_wifi_config_open_network_omits_an_unneeded_passphrase(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "open.env"
+            source.write_text(
+                "LIVE_WIFI_ESSID='Guest'\nLIVE_WIFI_SECURITY='open'\nLIVE_WIFI_PASSPHRASE='MustNotShip'\n",
+                encoding="utf-8",
+            )
+            source.chmod(0o600)
+            config = live_hooks.load_debian_live_wifi_config(source)
+            self.assertEqual(config["LIVE_WIFI_PASSPHRASE"], "")
+            self.assertNotIn("MustNotShip", live_hooks.render_debian_live_wifi_config(source))
+
+    def test_kernel_module_policy_rejects_empty_invalid_and_symlinked_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            with self.assertRaisesRegex(ValueError, "at least one module"):
+                live_hooks.stage_live_kernel_module_policy(root, [])
+            with self.assertRaisesRegex(ValueError, "invalid Live kernel module name"):
+                live_hooks.stage_live_kernel_module_policy(root, ["xxhash/../../escape"])
+
+            modules_dir = root / "usr/share/initramfs-tools/modules.d"
+            modules_dir.mkdir(parents=True)
+            outside = root / "outside"
+            outside.write_text("unchanged\n", encoding="utf-8")
+            (modules_dir / "debian-usb-live").symlink_to(outside)
+            with self.assertRaisesRegex(ValueError, "must not be a symlink"):
+                live_hooks.stage_live_kernel_module_policy(root, ["xxhash"])
+            self.assertEqual(outside.read_text(encoding="utf-8"), "unchanged\n")
+
     def test_locale_policy_enables_en_us_utf8_and_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

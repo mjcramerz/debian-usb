@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-
 from dataclasses import replace
 import json
 import os
@@ -49,6 +47,7 @@ from .constants import (
     PROFILE_UBUNTU_SERVER,
 )
 from .iso_source import DirectorySource, MediaSource, _collapse_whitespace, _normalize_member_path, _split_kernel_args, open_source
+from .live_hooks import DEBIAN_LIVE_HOOK_KERNEL_ARGS
 
 
 _INSTALLER_ENTRY_KINDS = {"installer", "automated-installer", "expert-installer", "rescue"}
@@ -381,43 +380,6 @@ def _merge_kernel_args(kernel_args: str, additions: str) -> str:
     return _collapse_whitespace(" ".join(merged + suffix))
 
 
-def _kernel_arg_value(config_data: dict[str, str], key: str) -> str:
-    value = config_data.get(key, "").strip()
-    if not value:
-        return ""
-    if any(char.isspace() for char in value):
-        raise ValueError(f"{key} must not contain whitespace")
-    return value
-
-
-def _kernel_arg_assignment(name: str, value: str) -> str:
-    value = value.strip()
-    if not value:
-        return ""
-    if any(char.isspace() for char in value):
-        raise ValueError(f"{name} value must not contain whitespace")
-    return f"{name}={value}"
-
-
-def _kernel_arg_base64url_assignment(name: str, value: str) -> str:
-    value = value.strip()
-    if not value:
-        return ""
-    encoded = base64.urlsafe_b64encode(value.encode("utf-8")).decode("ascii").rstrip("=")
-    return f"{name}={encoded}"
-
-
-def _live_wifi_text_value(config_data: dict[str, str], key: str, *, max_bytes: int) -> str:
-    value = config_data.get(key, "").strip()
-    if not value:
-        return ""
-    if any(ord(char) < 32 or ord(char) == 127 for char in value):
-        raise ValueError(f"{key} must not contain control characters")
-    if len(value.encode("utf-8")) > max_bytes:
-        raise ValueError(f"{key} must not exceed {max_bytes} UTF-8 bytes")
-    return value
-
-
 def _kernel_arg_assignments(kernel_args: str) -> dict[str, str]:
     assignments: dict[str, str] = {}
     for item in _split_kernel_args(kernel_args):
@@ -431,34 +393,11 @@ def _kernel_arg_assignments(kernel_args: str) -> dict[str, str]:
 def _live_hook_kernel_args(config_data: dict[str, str], profile: str) -> str:
     if profile != PROFILE_DEBIAN:
         return ""
-    if config_data.get("DEFAULT_LIVE_HOOKS", "0").strip() != "1":
-        return ""
-    additions: list[str] = []
-    hook_args = _remove_secret_kernel_args(config_data.get("DEFAULT_LIVE_ARGS_HOOKS", ""))
-    if hook_args:
-        additions.extend(_split_kernel_args(hook_args))
-
-    wifi_essid = _live_wifi_text_value(config_data, "DEFAULT_LIVE_WIFI_ESSID", max_bytes=32)
-    if not wifi_essid:
-        return _collapse_whitespace(" ".join(additions))
-
-    live_wifi_values = (
-        ("live_wifi_interface", _kernel_arg_value(config_data, "DEFAULT_LIVE_WIFI_INTERFACE")),
-        ("live_wifi_security", _kernel_arg_value(config_data, "DEFAULT_LIVE_WIFI_SECURITY")),
-        ("live_wifi_cidr", _kernel_arg_value(config_data, "DEFAULT_LIVE_WIFI_CIDR")),
-        ("live_wifi_gateway", _kernel_arg_value(config_data, "DEFAULT_LIVE_WIFI_GATEWAY")),
-        ("live_wifi_nameservers", _kernel_arg_value(config_data, "DEFAULT_LIVE_WIFI_NAMESERVERS")),
-    )
-    for name, value in live_wifi_values:
-        assignment = _kernel_arg_assignment(name, value)
-        if assignment:
-            additions.append(assignment)
-    encoded_values = [("live_wifi_essid_b64", wifi_essid)]
-    for name, value in encoded_values:
-        assignment = _kernel_arg_base64url_assignment(name, value)
-        if assignment:
-            additions.append(assignment)
-    return _collapse_whitespace(" ".join(additions))
+    mandatory_args = " ".join(DEBIAN_LIVE_HOOK_KERNEL_ARGS)
+    optional_args = ""
+    if config_data.get("DEFAULT_LIVE_HOOKS", "0").strip() == "1":
+        optional_args = _remove_secret_kernel_args(config_data.get("DEFAULT_LIVE_ARGS_HOOKS", ""))
+    return _merge_kernel_args(optional_args, mandatory_args)
 
 
 def _escape_unescaped_semicolons(value: str) -> str:
@@ -823,6 +762,9 @@ def _finalize_kernel_args(
             r"persistence-label=.*",
             r"persistence-encryption=.*",
             r"persistence-media=.*",
+            r"persistence-storage=.*",
+            r"persistence-method=.*",
+            r"union=.*",
         ],
     )
     args = _merge_kernel_args(args, "ignore_uuid")
@@ -832,13 +774,25 @@ def _finalize_kernel_args(
         return args
     if persistence_mode == PERSISTENCE_MODE_ENCRYPTED:
         if profile in {PROFILE_DEBIAN, PROFILE_KALI_LINUX, PROFILE_TAILS}:
-            args = _merge_kernel_args(args, "persistent=cryptsetup persistence-encryption=luks persistence persistence-media=removable-usb")
+            args = _merge_kernel_args(
+                args,
+                "persistent=cryptsetup persistence-encryption=luks persistence "
+                "persistence-media=removable-usb persistence-storage=filesystem union=overlay",
+            )
         else:
-            args = _merge_kernel_args(args, "persistence persistence-encryption=luks persistence-media=removable-usb")
+            args = _merge_kernel_args(
+                args,
+                "persistence persistence-encryption=luks persistence-media=removable-usb "
+                "persistence-storage=filesystem union=overlay",
+            )
         if persistence_label:
             args = _merge_kernel_args(args, f"persistence-label={persistence_label}")
     elif persistence_mode == PERSISTENCE_MODE_PLAIN:
-        args = _merge_kernel_args(args, f"persistence persistence-label={persistence_label or 'persistence'} persistence-media=removable-usb")
+        args = _merge_kernel_args(
+            args,
+            f"persistence persistence-label={persistence_label or 'persistence'} "
+            "persistence-media=removable-usb persistence-storage=filesystem union=overlay",
+        )
     return args
 
 

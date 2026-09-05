@@ -3,7 +3,6 @@ package app
 import (
 	"bufio"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -40,12 +39,39 @@ var (
 		"obs_password":           {},
 	}
 	liveWifiSecretKernelArgNames = map[string]struct{}{
-		"DEFAULT_LIVE_WIFI_PSK":   {},
-		"PRESEED_WIFI_PASSPHRASE": {},
-		"live_wifi_psk":           {},
-		"live_wifi_psk_b64":       {},
-		"live_wifi_wpa":           {},
-		"netcfg/wireless_wpa":     {},
+		"DEFAULT_LIVE_WIFI_INTERFACE":   {},
+		"DEFAULT_LIVE_WIFI_ESSID":       {},
+		"DEFAULT_LIVE_WIFI_SECURITY":    {},
+		"DEFAULT_LIVE_WIFI_CIDR":        {},
+		"DEFAULT_LIVE_WIFI_GATEWAY":     {},
+		"DEFAULT_LIVE_WIFI_NAMESERVERS": {},
+		"DEFAULT_LIVE_WIFI_PSK":         {},
+		"LIVE_WIFI_INTERFACE":           {},
+		"LIVE_WIFI_ESSID":               {},
+		"LIVE_WIFI_SECURITY":            {},
+		"LIVE_WIFI_CIDR":                {},
+		"LIVE_WIFI_GATEWAY":             {},
+		"LIVE_WIFI_NAMESERVERS":         {},
+		"LIVE_WIFI_PASSPHRASE":          {},
+		"PRESEED_WIFI_PASSPHRASE":       {},
+		"live_wifi":                     {},
+		"live_wifi_enabled":             {},
+		"live_wifi_interface":           {},
+		"live_wifi_iface":               {},
+		"live_wifi_ssid":                {},
+		"live_wifi_essid":               {},
+		"live_wifi_essid_b64":           {},
+		"live_wifi_security":            {},
+		"live_wifi_cidr":                {},
+		"live_wifi_gateway":             {},
+		"live_wifi_nameservers":         {},
+		"live_wifi_psk":                 {},
+		"live_wifi_psk_b64":             {},
+		"live_wifi_wpa":                 {},
+		"netcfg/choose_interface":       {},
+		"netcfg/wireless_essid":         {},
+		"netcfg/wireless_security_type": {},
+		"netcfg/wireless_wpa":           {},
 	}
 	legacyKeyAliases = map[string]string{
 		"KALI_LIVE_KERNEL_EXTRAS":      "KALI_LINUX_LIVE_KERNEL_EXTRAS",
@@ -211,32 +237,6 @@ func normalizeConfigMap(raw map[string]string) (map[string]string, error) {
 	}
 	normalized["DEFAULT_LIVE_HOOKS"] = defaultLiveHooks
 	normalized["DEFAULT_LIVE_ARGS_HOOKS"] = collapseWhitespace(normalized["DEFAULT_LIVE_ARGS_HOOKS"])
-	defaultLiveWifiInterface, err := normalizeSingleTokenString(normalized["DEFAULT_LIVE_WIFI_INTERFACE"], "DEFAULT_LIVE_WIFI_INTERFACE")
-	if err != nil {
-		return nil, err
-	}
-	normalized["DEFAULT_LIVE_WIFI_INTERFACE"] = defaultLiveWifiInterface
-	defaultLiveWifiESSID, err := normalizeLiveWifiTextString(normalized["DEFAULT_LIVE_WIFI_ESSID"], "DEFAULT_LIVE_WIFI_ESSID", 32)
-	if err != nil {
-		return nil, err
-	}
-	normalized["DEFAULT_LIVE_WIFI_ESSID"] = defaultLiveWifiESSID
-	defaultLiveWifiSecurity, err := validateLiveWifiSecurityString(normalized["DEFAULT_LIVE_WIFI_SECURITY"])
-	if err != nil {
-		return nil, err
-	}
-	normalized["DEFAULT_LIVE_WIFI_SECURITY"] = defaultLiveWifiSecurity
-	defaultLiveWifiCIDR, err := normalizeIPv4CIDRString(normalized["DEFAULT_LIVE_WIFI_CIDR"], "DEFAULT_LIVE_WIFI_CIDR")
-	if err != nil {
-		return nil, err
-	}
-	normalized["DEFAULT_LIVE_WIFI_CIDR"] = defaultLiveWifiCIDR
-	defaultLiveWifiGateway, err := normalizeSingleTokenString(normalized["DEFAULT_LIVE_WIFI_GATEWAY"], "DEFAULT_LIVE_WIFI_GATEWAY")
-	if err != nil {
-		return nil, err
-	}
-	normalized["DEFAULT_LIVE_WIFI_GATEWAY"] = defaultLiveWifiGateway
-	normalized["DEFAULT_LIVE_WIFI_NAMESERVERS"] = normalizeCommaListString(normalized["DEFAULT_LIVE_WIFI_NAMESERVERS"])
 
 	for _, key := range partitionLabelConfigKeys {
 		value, err := normalizePartitionLabel(normalized[key], key)
@@ -302,12 +302,6 @@ func runtimeConfigFromMap(path string, data map[string]string) RuntimeConfig {
 		DefaultLiveToram:              data["DEFAULT_LIVE_TORAM"] == "1",
 		DefaultLiveHooks:              data["DEFAULT_LIVE_HOOKS"] == "1",
 		DefaultLiveArgsHooks:          data["DEFAULT_LIVE_ARGS_HOOKS"],
-		DefaultLiveWifiInterface:      data["DEFAULT_LIVE_WIFI_INTERFACE"],
-		DefaultLiveWifiESSID:          data["DEFAULT_LIVE_WIFI_ESSID"],
-		DefaultLiveWifiSecurity:       data["DEFAULT_LIVE_WIFI_SECURITY"],
-		DefaultLiveWifiCIDR:           data["DEFAULT_LIVE_WIFI_CIDR"],
-		DefaultLiveWifiGateway:        data["DEFAULT_LIVE_WIFI_GATEWAY"],
-		DefaultLiveWifiNameservers:    data["DEFAULT_LIVE_WIFI_NAMESERVERS"],
 		DefaultPreseedPublicURL:       data["DEBIAN_PRESEED_PUBLIC_URL"],
 		DefaultPreseedPublicArgs:      data["DEBIAN_PRESEED_PUBLIC_ARGS"],
 		DefaultPreseedInternalArgs:    data["DEBIAN_PRESEED_INTERNAL_ARGS"],
@@ -349,12 +343,6 @@ func configMapFromRuntimeConfig(cfg RuntimeConfig) map[string]string {
 	data["DEFAULT_LIVE_MEM_GIB"] = strconv.Itoa(cfg.DefaultLiveMemGiB)
 	data["DEFAULT_LIVE_HOOKS"] = boolFlag(cfg.DefaultLiveHooks)
 	data["DEFAULT_LIVE_ARGS_HOOKS"] = collapseWhitespace(cfg.DefaultLiveArgsHooks)
-	data["DEFAULT_LIVE_WIFI_INTERFACE"] = strings.TrimSpace(cfg.DefaultLiveWifiInterface)
-	data["DEFAULT_LIVE_WIFI_ESSID"] = strings.TrimSpace(cfg.DefaultLiveWifiESSID)
-	data["DEFAULT_LIVE_WIFI_SECURITY"] = strings.TrimSpace(cfg.DefaultLiveWifiSecurity)
-	data["DEFAULT_LIVE_WIFI_CIDR"] = strings.TrimSpace(cfg.DefaultLiveWifiCIDR)
-	data["DEFAULT_LIVE_WIFI_GATEWAY"] = strings.TrimSpace(cfg.DefaultLiveWifiGateway)
-	data["DEFAULT_LIVE_WIFI_NAMESERVERS"] = normalizeCommaListString(cfg.DefaultLiveWifiNameservers)
 	data["DEBIAN_PRESEED_PUBLIC_URL"] = strings.TrimSpace(cfg.DefaultPreseedPublicURL)
 	data["DEBIAN_PRESEED_PUBLIC_ARGS"] = collapseWhitespace(cfg.DefaultPreseedPublicArgs)
 	data["DEBIAN_PRESEED_INTERNAL_ARGS"] = collapseWhitespace(cfg.DefaultPreseedInternalArgs)
@@ -428,20 +416,13 @@ func runtimeConfigSections() []configSection {
 		{
 			Title: "Live config hooks",
 			Comments: []string{
-				"When DEFAULT_LIVE_HOOKS is enabled, Debian raw-ISO Live payloads receive repo-managed live-config hooks.",
-				"Only non-secret DEFAULT_LIVE_WIFI_* values are appended to Live entries.",
-				"The passphrase is read from PRESEED_WIFI_PASSPHRASE in the selected Debian Live initrd overlay.",
-				"Supported Wi-Fi security modes are open, wpa, and sae; sae maps to WPA3/SAE.",
+				"Debian Live always receives the APT repair and Wi-Fi hooks plus live-config.hooks=medium.",
+				"DEFAULT_LIVE_HOOKS controls only optional additional hook arguments.",
+				"Every Wi-Fi value is read from initrd/debian/live/live.env and never appended to kernel arguments.",
 			},
 			Keys: []string{
 				"DEFAULT_LIVE_HOOKS",
 				"DEFAULT_LIVE_ARGS_HOOKS",
-				"DEFAULT_LIVE_WIFI_INTERFACE",
-				"DEFAULT_LIVE_WIFI_ESSID",
-				"DEFAULT_LIVE_WIFI_SECURITY",
-				"DEFAULT_LIVE_WIFI_CIDR",
-				"DEFAULT_LIVE_WIFI_GATEWAY",
-				"DEFAULT_LIVE_WIFI_NAMESERVERS",
 			},
 		},
 		{
@@ -545,12 +526,6 @@ func requiredConfigKeys() []string {
 		"DEFAULT_LIVE_MEM_GIB",
 		"DEFAULT_LIVE_HOOKS",
 		"DEFAULT_LIVE_ARGS_HOOKS",
-		"DEFAULT_LIVE_WIFI_INTERFACE",
-		"DEFAULT_LIVE_WIFI_ESSID",
-		"DEFAULT_LIVE_WIFI_SECURITY",
-		"DEFAULT_LIVE_WIFI_CIDR",
-		"DEFAULT_LIVE_WIFI_GATEWAY",
-		"DEFAULT_LIVE_WIFI_NAMESERVERS",
 		"SHARED_LIVE_BASE_KERNEL_ARGS",
 		"BOOT_POLICY_BALANCED_KERNEL_ARGS",
 		"BOOT_POLICY_PERFORMANCE_KERNEL_ARGS",
@@ -583,12 +558,6 @@ func optionalEmptyKeys() map[string]bool {
 		"DEFAULT_INSTALLER_KERNEL_EXTRAS":       true,
 		"DEFAULT_FORENSICS_KERNEL_EXTRAS":       true,
 		"DEFAULT_LIVE_ARGS_HOOKS":               true,
-		"DEFAULT_LIVE_WIFI_INTERFACE":           true,
-		"DEFAULT_LIVE_WIFI_ESSID":               true,
-		"DEFAULT_LIVE_WIFI_SECURITY":            true,
-		"DEFAULT_LIVE_WIFI_CIDR":                true,
-		"DEFAULT_LIVE_WIFI_GATEWAY":             true,
-		"DEFAULT_LIVE_WIFI_NAMESERVERS":         true,
 		"DEBIAN_PRESEED_PUBLIC_ARGS":            true,
 		"DEBIAN_PRESEED_INTERNAL_ARGS":          true,
 	}
@@ -778,70 +747,6 @@ func normalizeNonNegativeIntString(value string, key string) (string, error) {
 	return strconv.Itoa(number), nil
 }
 
-func normalizeSingleTokenString(value string, key string) (string, error) {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return "", nil
-	}
-	if strings.ContainsAny(trimmed, " \t\r\n") {
-		return "", fmt.Errorf("%s must not contain whitespace", key)
-	}
-	return trimmed, nil
-}
-
-func normalizeLiveWifiTextString(value string, key string, maxBytes int) (string, error) {
-	normalized := strings.TrimSpace(value)
-	if normalized == "" {
-		return "", nil
-	}
-	for _, char := range []byte(normalized) {
-		if char < 0x20 || char == 0x7f {
-			return "", fmt.Errorf("%s must not contain control characters", key)
-		}
-	}
-	if len([]byte(normalized)) > maxBytes {
-		return "", fmt.Errorf("%s must not exceed %d UTF-8 bytes", key, maxBytes)
-	}
-	return normalized, nil
-}
-
-func normalizeIPv4CIDRString(value string, key string) (string, error) {
-	trimmed, err := normalizeSingleTokenString(value, key)
-	if err != nil {
-		return "", err
-	}
-	if trimmed == "" {
-		return "", nil
-	}
-	address, prefix, found := strings.Cut(trimmed, "/")
-	if !found || prefix == "" {
-		return "", fmt.Errorf("%s must include a CIDR prefix such as 192.168.50.43/24", key)
-	}
-	if net.ParseIP(address).To4() == nil {
-		return "", fmt.Errorf("%s must use an IPv4 address", key)
-	}
-	prefixNumber, err := strconv.Atoi(prefix)
-	if err != nil || prefixNumber < 0 || prefixNumber > 32 {
-		return "", fmt.Errorf("%s prefix must be between 0 and 32", key)
-	}
-	return fmt.Sprintf("%s/%d", address, prefixNumber), nil
-}
-
-func validateLiveWifiSecurityString(value string) (string, error) {
-	trimmed, err := normalizeSingleTokenString(value, "DEFAULT_LIVE_WIFI_SECURITY")
-	if err != nil {
-		return "", err
-	}
-	switch trimmed {
-	case "":
-		return "", nil
-	case "open", "wpa", "sae":
-		return trimmed, nil
-	default:
-		return "", fmt.Errorf("DEFAULT_LIVE_WIFI_SECURITY must be one of: open, wpa, sae")
-	}
-}
-
 func validateNoLegacySecretKernelArgs(value string, key string) error {
 	found := make([]string, 0)
 	seen := make(map[string]struct{})
@@ -887,7 +792,7 @@ func validateNoLegacySecretKernelArgs(value string, key string) error {
 	}
 	sort.Strings(liveWifiFound)
 	return fmt.Errorf(
-		"%s contains forbidden Live Wi-Fi passphrase kernel argument(s): %s; store the passphrase in initrd/debian/live/live.env",
+		"%s contains forbidden Live Wi-Fi kernel argument(s): %s; store every Wi-Fi value in initrd/debian/live/live.env",
 		key,
 		strings.Join(liveWifiFound, ", "),
 	)

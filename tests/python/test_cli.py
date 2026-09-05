@@ -1,5 +1,7 @@
 import io
 import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -195,7 +197,7 @@ class CLITests(unittest.TestCase):
                         "/tmp/debian-live.iso",
                         "--no-tools",
                         "--live-kernel-args",
-                        "live-config.hooks=medium live_wifi_essid_b64=SW5zdGFsbE5ldA",
+                        "live-config.hooks=medium debian_usb.profile=test",
                     ]
                 )
 
@@ -205,8 +207,72 @@ class CLITests(unittest.TestCase):
             "debian",
             "",
             selected_groups=[],
-            live_kernel_args="live-config.hooks=medium live_wifi_essid_b64=SW5zdGFsbE5ldA",
+            live_kernel_args="live-config.hooks=medium debian_usb.profile=test",
         )
+
+    def test_main_validates_live_wifi_config_without_echoing_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            live_env = Path(temp_dir) / "live.env"
+            live_env.write_text(
+                "\n".join(
+                    (
+                        "LIVE_WIFI_INTERFACE='wlan0'",
+                        "LIVE_WIFI_ESSID='Fixture Network'",
+                        "LIVE_WIFI_SECURITY='wpa'",
+                        "LIVE_WIFI_CIDR='192.0.2.10/24'",
+                        "LIVE_WIFI_GATEWAY='192.0.2.1'",
+                        "LIVE_WIFI_NAMESERVERS='192.0.2.1,198.51.100.53'",
+                        "LIVE_WIFI_PASSPHRASE='literal$Pass123'",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            live_env.chmod(0o600)
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch("sys.stdout", stdout), patch("sys.stderr", stderr):
+                exit_code = cli.main(
+                    ["validate-live-wifi-config", "--path", str(live_env)]
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(json.loads(stdout.getvalue()), {"valid": True})
+            self.assertEqual(stderr.getvalue(), "")
+            self.assertNotIn("Fixture Network", stdout.getvalue())
+            self.assertNotIn("literal$Pass123", stdout.getvalue())
+
+            live_env.chmod(0o644)
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch("sys.stdout", stdout), patch("sys.stderr", stderr):
+                exit_code = cli.main(
+                    ["validate-live-wifi-config", "--path", str(live_env)]
+                )
+
+            self.assertEqual(exit_code, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertIn("mode 0600", stderr.getvalue())
+            self.assertNotIn("Fixture Network", stderr.getvalue())
+            self.assertNotIn("literal$Pass123", stderr.getvalue())
+
+            live_env.write_text(
+                "LIVE_WIFI_ESSID=\"Publisher's Network\"\n"
+                "LIVE_WIFI_SECURITY='open'\n",
+                encoding="utf-8",
+            )
+            live_env.chmod(0o600)
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch("sys.stdout", stdout), patch("sys.stderr", stderr):
+                exit_code = cli.main(
+                    ["validate-live-wifi-config", "--path", str(live_env)]
+                )
+
+            self.assertEqual(exit_code, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertIn("must not contain single quote", stderr.getvalue())
+            self.assertNotIn("Publisher's Network", stderr.getvalue())
 
 
 if __name__ == "__main__":

@@ -25,129 +25,62 @@ lw_has_default_route() (
   return 1
 )
 
-lw_strip_quotes() (
-  value=$1
-  value=${value%\"}
-  value=${value#\"}
-  value=${value%\'}
-  value=${value#\'}
-  printf '%s\n' "${value}"
-)
-
-lw_cmdline_value() (
-  key=$1
-  [ -r /proc/cmdline ] || return 1
-  old_ifs=${IFS}
-  IFS=' '
-  # Intentional splitting: kernel command lines are space-delimited tokens.
-  # shellcheck disable=SC2013,SC2046
-  for token in $(cat /proc/cmdline); do
-    case ${token} in
-      "${key}="*)
-        value=${token#*=}
-        lw_strip_quotes "${value}"
-        return 0
-        ;;
-    esac
-  done
-  IFS=${old_ifs}
-  return 1
-)
-
-lw_env_value() (
-  case $1 in
-    LIVE_WIFI_ENABLED) printf '%s\n' "${LIVE_WIFI_ENABLED:-}" ;;
-    LIVE_WIFI_INTERFACE) printf '%s\n' "${LIVE_WIFI_INTERFACE:-}" ;;
-    LIVE_WIFI_SSID) printf '%s\n' "${LIVE_WIFI_SSID:-}" ;;
-    LIVE_WIFI_SECURITY) printf '%s\n' "${LIVE_WIFI_SECURITY:-}" ;;
-    LIVE_WIFI_PSK) printf '%s\n' "${LIVE_WIFI_PSK:-}" ;;
-    LIVE_WIFI_CIDR) printf '%s\n' "${LIVE_WIFI_CIDR:-}" ;;
-    LIVE_WIFI_NAMESERVERS) printf '%s\n' "${LIVE_WIFI_NAMESERVERS:-}" ;;
-    LIVE_WIFI_GATEWAY) printf '%s\n' "${LIVE_WIFI_GATEWAY:-}" ;;
-    *) return 1 ;;
-  esac
-)
-
 lw_assignment_value() (
   assignment_path=$1
   assignment_key=$2
+  [ -f "${assignment_path}" ] && [ ! -L "${assignment_path}" ] || return 1
   awk -v key="${assignment_key}" '
     index($0, key "=") != 1 { next }
     {
-      value = substr($0, length(key) + 2)
-      if (length(value) >= 2) {
-        first = substr(value, 1, 1)
-        last = substr(value, length(value), 1)
+      count++
+      raw = substr($0, length(key) + 2)
+      sub(/^[[:space:]]+/, "", raw)
+      sub(/[[:space:]]+$/, "", raw)
+      if (length(raw) >= 2) {
+        first = substr(raw, 1, 1)
+        last = substr(raw, length(raw), 1)
         if ((first == "\047" && last == "\047") || (first == "\"" && last == "\"")) {
-          value = substr(value, 2, length(value) - 2)
+          raw = substr(raw, 2, length(raw) - 2)
         }
       }
-      print value
-      found = 1
-      exit
+      value = raw
     }
-    END { if (!found) exit 1 }
+    END {
+      if (count != 1) exit 1
+      print value
+    }
   ' "${assignment_path}" 2>/dev/null
 )
 
-lw_live_wifi_passphrase() (
-  value=$(lw_env_value LIVE_WIFI_PSK 2>/dev/null || true)
-  if [ -n "${value}" ]; then
-    printf '%s\n' "${value}"
+lw_live_env_path() (
+  if [ -n "${DEBIAN_USB_LIVE_ENV_PATH:-}" ]; then
+    case ${DEBIAN_USB_LIVE_ENV_PATH} in /*) ;; *) return 1 ;; esac
+    [ -f "${DEBIAN_USB_LIVE_ENV_PATH}" ] && [ ! -L "${DEBIAN_USB_LIVE_ENV_PATH}" ] || return 1
+    printf '%s\n' "${DEBIAN_USB_LIVE_ENV_PATH}"
     return 0
   fi
-  lw_assignment_value \
-    "${DEBIAN_USB_LIVE_ENV_PATH:-/run/initramfs/debian-usb/live.env}" \
-    PRESEED_WIFI_PASSPHRASE
-)
-
-lw_config_value() (
-  env_name=$1
-  shift
-  value=$(lw_env_value "${env_name}" 2>/dev/null || true)
-  if [ -n "${value}" ]; then
-    printf '%s\n' "${value}"
+  for candidate in \
+    /run/initramfs/debian-usb/live.env \
+    /etc/debian-usb/live.env \
+    /run/live/medium/live/debian-usb-live.env \
+    /lib/live/mount/medium/live/debian-usb-live.env
+  do
+    [ -f "${candidate}" ] && [ ! -L "${candidate}" ] || continue
+    printf '%s\n' "${candidate}"
     return 0
-  fi
-  for key in "$@"; do
-    if value=$(lw_cmdline_value "${key}"); then
-      printf '%s\n' "${value}"
-      return 0
-    fi
   done
   return 1
 )
 
-lw_decode_base64url() (
-  value=$1
-  case ${value} in
-    ''|*[!A-Za-z0-9_-]*) return 1 ;;
-  esac
-  remainder=$((${#value} % 4))
-  [ "${remainder}" -ne 1 ] || return 1
-  value=$(printf '%s' "${value}" | tr '_-' '/+')
-  case ${remainder} in
-    2) value=${value}== ;;
-    3) value=${value}= ;;
-  esac
-  decoded=$(printf '%s' "${value}" | base64 --decode 2>/dev/null) || return 1
-  printf '%s' "${decoded}"
+lw_config_value() (
+  live_env_path=$1
+  key=$2
+  lw_assignment_value "${live_env_path}" "${key}"
 )
 
-lw_config_encoded_value() (
-  env_name=$1
-  encoded_key=$2
-  shift 2
-  value=$(lw_env_value "${env_name}" 2>/dev/null || true)
-  if [ -n "${value}" ]; then
-    printf '%s\n' "${value}"
-    return 0
-  fi
-  if encoded=$(lw_cmdline_value "${encoded_key}"); then
-    lw_decode_base64url "${encoded}"
-    return
-  fi
-  lw_config_value "${env_name}" "$@"
+lw_live_wifi_passphrase() (
+  live_env_path=$1
+  lw_config_value "${live_env_path}" LIVE_WIFI_PASSPHRASE
 )
 
 lw_valid_interface_name() (
@@ -624,64 +557,62 @@ lw_configure_nameservers() (
 )
 
 lw_main() (
-  enabled=$(lw_config_value LIVE_WIFI_ENABLED live_wifi live_wifi_enabled 2>/dev/null || printf '1')
-  case ${enabled} in
-    0|false|False|FALSE|no|No|NO|off|Off|OFF)
-      lw_log "disabled by live_wifi kernel argument"
-      return 0
-      ;;
-  esac
+  live_env_path=$(lw_live_env_path 2>/dev/null || true)
+  if [ -z "${live_env_path}" ]; then
+    lw_log "no private Debian Live Wi-Fi environment file found; skipping"
+    return 0
+  fi
 
-  ssid=$(lw_config_encoded_value LIVE_WIFI_SSID live_wifi_essid_b64 live_wifi_ssid live_wifi_essid netcfg/wireless_essid 2>/dev/null || true)
+  ssid=$(lw_config_value "${live_env_path}" LIVE_WIFI_ESSID 2>/dev/null || true)
   if [ -z "${ssid}" ]; then
-    lw_log "no live Wi-Fi SSID configured; skipping"
+    lw_log "no LIVE_WIFI_ESSID configured; skipping"
     return 0
   fi
   if ! lw_valid_wifi_text "${ssid}"; then
-    lw_warn "configured Wi-Fi SSID contains control characters; skipping"
+    lw_warn "configured Wi-Fi ESSID contains control characters; skipping"
     return 0
   fi
   ssid_bytes=$(lw_text_byte_length "${ssid}")
   if [ "${ssid_bytes}" -gt 32 ]; then
-    lw_warn "configured Wi-Fi SSID exceeds 32 bytes; skipping"
+    lw_warn "configured Wi-Fi ESSID exceeds 32 bytes; skipping"
     return 0
   fi
 
-  interface_request=$(lw_config_value LIVE_WIFI_INTERFACE live_wifi_interface live_wifi_iface netcfg/choose_interface interface 2>/dev/null || printf 'auto')
-  security=$(lw_config_value LIVE_WIFI_SECURITY live_wifi_security netcfg/wireless_security_type 2>/dev/null || printf 'wpa')
+  interface_request=$(lw_config_value "${live_env_path}" LIVE_WIFI_INTERFACE 2>/dev/null || printf 'auto')
+  security=$(lw_config_value "${live_env_path}" LIVE_WIFI_SECURITY 2>/dev/null || printf 'wpa')
   security=$(lw_validate_security "${security}") || {
-    lw_warn "unsupported live Wi-Fi security mode: ${security}"
+    lw_warn "unsupported LIVE_WIFI_SECURITY mode"
     return 0
   }
   if [ "${security}" = open ]; then
     psk=
   else
-    psk=$(lw_live_wifi_passphrase 2>/dev/null || true)
+    psk=$(lw_live_wifi_passphrase "${live_env_path}" 2>/dev/null || true)
   fi
-  cidr=$(lw_config_value LIVE_WIFI_CIDR live_wifi_cidr 2>/dev/null || true)
-  nameservers=$(lw_config_value LIVE_WIFI_NAMESERVERS live_wifi_nameservers 2>/dev/null || true)
-  gateway=$(lw_config_value LIVE_WIFI_GATEWAY live_wifi_gateway netcfg/get_gateway 2>/dev/null || true)
+  cidr=$(lw_config_value "${live_env_path}" LIVE_WIFI_CIDR 2>/dev/null || true)
+  nameservers=$(lw_config_value "${live_env_path}" LIVE_WIFI_NAMESERVERS 2>/dev/null || true)
+  gateway=$(lw_config_value "${live_env_path}" LIVE_WIFI_GATEWAY 2>/dev/null || true)
   if [ "${security}" != open ] && [ -z "${psk}" ]; then
-    lw_warn "live Wi-Fi security ${security} requires a PSK; skipping"
+    lw_warn "secured Live Wi-Fi requires LIVE_WIFI_PASSPHRASE; skipping"
     return 0
   fi
   if [ "${security}" != open ] && ! lw_valid_wifi_text "${psk}"; then
-    lw_warn "live Wi-Fi passphrase contains control characters; skipping"
+    lw_warn "LIVE_WIFI_PASSPHRASE contains control characters; skipping"
     return 0
   fi
   psk_bytes=$(lw_text_byte_length "${psk}")
   if [ "${security}" = wpa ] && ! lw_is_hex_psk "${psk}" && { [ "${psk_bytes}" -lt 8 ] || [ "${psk_bytes}" -gt 63 ]; }; then
-    lw_warn "WPA2 passphrase must contain 8 to 63 characters, or be a 64-digit hexadecimal PSK; skipping"
+    lw_warn "WPA2 LIVE_WIFI_PASSPHRASE must contain 8 to 63 UTF-8 bytes or be a 64-digit hexadecimal PSK; skipping"
     return 0
   fi
   if [ "${security}" = sae ] && { [ "${psk_bytes}" -lt 1 ] || [ "${psk_bytes}" -gt 63 ]; }; then
-    lw_warn "WPA3 SAE passphrase must contain 1 to 63 characters; skipping"
+    lw_warn "WPA3 SAE LIVE_WIFI_PASSPHRASE must contain 1 to 63 UTF-8 bytes; skipping"
     return 0
   fi
 
   lw_ensure_required_tools "${interface_request}" "${cidr}" || return 0
   interface=$(lw_resolve_interface "${interface_request}") || {
-    lw_warn "no usable Wi-Fi interface found for request: ${interface_request}"
+    lw_warn "no usable Wi-Fi interface found for the configured request"
     return 0
   }
   if ! lw_ssid_visible "${interface}" "${ssid}"; then

@@ -55,6 +55,52 @@ LW_TEST_COMMAND_LOG=${command_log}
 LW_TEST_SCAN_FILE=${scan_file}
 export PATH LW_TEST_COMMAND_LOG LW_TEST_SCAN_FILE
 
+live_env=${temp_root}/live.env
+cat >"${live_env}" <<'EOF_LIVE_ENV'
+# Only explicit LIVE_WIFI_* assignments are consumed.
+UNRELATED='ignored'
+LIVE_WIFI_INTERFACE='wlan-test'
+LIVE_WIFI_ESSID='Install Net'
+LIVE_WIFI_SECURITY='wpa'
+LIVE_WIFI_CIDR='192.0.2.44/24'
+LIVE_WIFI_GATEWAY='192.0.2.1'
+LIVE_WIFI_NAMESERVERS='192.0.2.53,198.51.100.53'
+LIVE_WIFI_PASSPHRASE='123456789222aER$'
+EOF_LIVE_ENV
+chmod 0600 "${live_env}"
+
+[ "$(lw_assignment_value "${live_env}" LIVE_WIFI_INTERFACE)" = wlan-test ] || fail "Live interface parsing failed"
+[ "$(lw_assignment_value "${live_env}" LIVE_WIFI_ESSID)" = 'Install Net' ] || fail "Live ESSID parsing failed"
+[ "$(lw_assignment_value "${live_env}" LIVE_WIFI_PASSPHRASE)" = '123456789222aER$' ] || fail "Live passphrase special-character parsing failed"
+if lw_assignment_value "${live_env}" PRESEED_WIFI_PASSPHRASE >/dev/null 2>&1; then
+  fail "legacy PRESEED_WIFI_PASSPHRASE was accepted for Debian Live"
+fi
+
+duplicate_env=${temp_root}/duplicate.env
+printf '%s\n' "LIVE_WIFI_ESSID='one'" "LIVE_WIFI_ESSID='two'" >"${duplicate_env}"
+if lw_assignment_value "${duplicate_env}" LIVE_WIFI_ESSID >/dev/null 2>&1; then
+  fail "duplicate Live Wi-Fi assignments were accepted"
+fi
+ln -s -- "${live_env}" "${temp_root}/live-link.env"
+DEBIAN_USB_LIVE_ENV_PATH=${temp_root}/live-link.env
+export DEBIAN_USB_LIVE_ENV_PATH
+if lw_live_env_path >/dev/null 2>&1; then
+  fail "symlinked Live Wi-Fi environment was accepted"
+fi
+DEBIAN_USB_LIVE_ENV_PATH=relative/live.env
+export DEBIAN_USB_LIVE_ENV_PATH
+if lw_live_env_path >/dev/null 2>&1; then
+  fail "relative Live Wi-Fi environment path was accepted"
+fi
+DEBIAN_USB_LIVE_ENV_PATH=${live_env}
+export DEBIAN_USB_LIVE_ENV_PATH
+[ "$(lw_live_env_path)" = "${live_env}" ] || fail "explicit Live Wi-Fi environment path was not selected"
+[ "$(lw_live_wifi_passphrase "${live_env}")" = '123456789222aER$' ] || fail "LIVE_WIFI_PASSPHRASE handoff failed"
+
+if grep -Eq 'lw_cmdline_value|live_wifi_essid_b64|netcfg/wireless_essid' "${repo_root}/config-hooks/1000-network-wifi.sh"; then
+  fail "Wi-Fi hook retained a kernel-command-line configuration path"
+fi
+
 missing_packages=$({
   # shellcheck disable=SC2329  # Override consumed by sourced functions.
   lw_have() {
@@ -64,37 +110,10 @@ missing_packages=$({
 })
 [ "${missing_packages}" = dhcpcd-base ] || fail "missing DHCP client did not select dhcpcd-base"
 
-[ "$(lw_decode_base64url SW5zdGFsbE5ldA)" = InstallNet ] || fail "Base64URL ESSID decoding failed"
-[ "$(lw_decode_base64url U2FmZVBhc3MxMjM)" = SafePass123 ] || fail "Base64URL PSK decoding failed"
-[ "$(lw_decode_base64url SW5zdGFsbCBOZXQ)" = 'Install Net' ] || fail "Base64URL ESSID whitespace decoding failed"
-[ "$(lw_decode_base64url U2FmZSBQYXNzIDEyMw)" = 'Safe Pass 123' ] || fail "Base64URL value whitespace decoding failed"
-live_env=${temp_root}/live.env
-printf '%s\n' \
-  "# unrelated assignments are ignored" \
-  "UNRELATED='ignored'" \
-  "PRESEED_WIFI_PASSPHRASE='Safe Pass 123'" >"${live_env}"
-[ "$(lw_assignment_value "${live_env}" PRESEED_WIFI_PASSPHRASE)" = 'Safe Pass 123' ] || fail "Live initrd passphrase parsing failed"
-DEBIAN_USB_LIVE_ENV_PATH=${live_env}
-export DEBIAN_USB_LIVE_ENV_PATH
-[ "$(lw_live_wifi_passphrase)" = 'Safe Pass 123' ] || fail "Live initrd passphrase handoff was not used"
-LIVE_WIFI_PSK='Explicit Override'
-export LIVE_WIFI_PSK
-[ "$(lw_live_wifi_passphrase)" = 'Explicit Override' ] || fail "explicit Live Wi-Fi passphrase override was ignored"
-unset LIVE_WIFI_PSK
-DEBIAN_USB_LIVE_ENV_PATH=${temp_root}/missing-live.env
-export DEBIAN_USB_LIVE_ENV_PATH
-if lw_live_wifi_passphrase >/dev/null 2>&1; then
-  fail "missing optional Live initrd passphrase unexpectedly succeeded"
-fi
-DEBIAN_USB_LIVE_ENV_PATH=${live_env}
-export DEBIAN_USB_LIVE_ENV_PATH
 [ "$(lw_text_byte_length 'Install Net')" = 11 ] || fail "Wi-Fi byte length calculation failed"
 tab=$(printf '\t')
 if lw_valid_wifi_text "Install${tab}Net"; then
   fail "Wi-Fi control-character validation accepted a tab"
-fi
-if lw_decode_base64url 'invalid+' >/dev/null 2>&1; then
-  fail "invalid Base64URL input was accepted"
 fi
 lw_valid_ipv4 192.0.2.1 || fail "valid IPv4 address was rejected"
 for invalid_ipv4 in 256.0.2.1 192.nope.2.1 192.0.2 192.0.2.1.9; do
@@ -107,15 +126,15 @@ open_config=${temp_root}/open.conf
 wpa_config=${temp_root}/wpa.conf
 sae_config=${temp_root}/sae.conf
 lw_build_wpa_config "${open_config}" InstallNet ignored-secret open
-lw_build_wpa_config "${wpa_config}" 'Install Net' 'Safe Pass 123' wpa
+lw_build_wpa_config "${wpa_config}" 'Install Net' '123456789222aER$' wpa
 lw_build_wpa_config "${sae_config}" InstallNet SafePass123 sae
 
 grep -Fqx '    key_mgmt=NONE' "${open_config}" || fail "open network did not use key_mgmt=NONE"
 ! grep -Fq 'ignored-secret' "${open_config}" || fail "open network retained an ignored passphrase"
 grep -Fqx '    key_mgmt=WPA-PSK' "${wpa_config}" || fail "WPA2 network did not use WPA-PSK"
 grep -Fqx '    proto=RSN' "${wpa_config}" || fail "WPA2 network was not constrained to RSN"
-grep -Fqx '    ssid="Install Net"' "${wpa_config}" || fail "WPA2 SSID whitespace was not preserved"
-grep -Fqx '    psk="Safe Pass 123"' "${wpa_config}" || fail "WPA2 passphrase whitespace was not preserved"
+grep -Fqx '    ssid="Install Net"' "${wpa_config}" || fail "WPA2 ESSID whitespace was not preserved"
+grep -Fqx '    psk="123456789222aER$"' "${wpa_config}" || fail "WPA2 passphrase special characters were not preserved"
 grep -Fqx '    key_mgmt=SAE' "${sae_config}" || fail "WPA3 network did not use SAE"
 grep -Fqx '    ieee80211w=2' "${sae_config}" || fail "WPA3 network did not require management-frame protection"
 [ "$(stat -c '%a' "${open_config}")" = 600 ] || fail "Wi-Fi config mode is not 0600"
@@ -124,9 +143,9 @@ cat >"${scan_file}" <<'EOF_SCAN'
 BSS 00:11:22:33:44:55(on wlan-test)
         SSID: OtherNetwork
 BSS 66:77:88:99:aa:bb(on wlan-test)
-        SSID: InstallNet
+        SSID: Install Net
 EOF_SCAN
-lw_ssid_visible wlan-test InstallNet || fail "visible exact ESSID was not detected"
+lw_ssid_visible wlan-test 'Install Net' || fail "visible exact ESSID was not detected"
 if lw_ssid_visible wlan-test MissingNetwork; then
   fail "missing ESSID was reported as visible"
 fi
@@ -144,34 +163,54 @@ dhcp_log=$(cat "${command_log}")
 printf '%s\n' "${dhcp_log}" | grep -Fq 'dhcpcd -4 -1 -L -p --waitip=4 wlan-test' || fail "dynamic Wi-Fi address did not use dhcpcd one-shot IPv4 mode"
 
 : >"${command_log}"
+# shellcheck disable=SC2329
 lw_has_other_default_route() { return 0; }
 lw_configure_nameservers wlan-test '192.0.2.53,198.51.100.53'
 resolver_log=$(cat "${command_log}")
 printf '%s\n' "${resolver_log}" | grep -Fq 'resolvectl dns wlan-test 192.0.2.53 198.51.100.53' || fail "per-link DNS was not configured"
 printf '%s\n' "${resolver_log}" | grep -Fq 'resolvectl default-route wlan-test no' || fail "Wi-Fi DNS displaced an existing default-route link"
 
-# shellcheck disable=SC2329  # Override consumed by sourced functions.
-lw_ensure_required_tools() {
-  fail "missing-ESSID path attempted tool installation"
+# Full automatic path: all values must come from the private file.
+auto_marker=${temp_root}/automatic-connect
+address_marker=${temp_root}/automatic-address
+resolver_marker=${temp_root}/automatic-resolver
+# shellcheck disable=SC2329
+lw_ensure_required_tools() { return 0; }
+# shellcheck disable=SC2329
+lw_resolve_interface() {
+  [ "$1" = wlan-test ] || return 1
+  printf '%s\n' wlan-test
 }
-LIVE_WIFI_SSID='' LIVE_WIFI_INTERFACE=wlan-test LIVE_WIFI_SECURITY=open lw_main
-LIVE_WIFI_SSID=123456789012345678901234567890123 \
-LIVE_WIFI_INTERFACE=wlan-test \
-LIVE_WIFI_SECURITY=open \
-  lw_main
-
-unset -f lw_ensure_required_tools
-# shellcheck disable=SC1091
-. "${repo_root}/config-hooks/1000-network-wifi.sh"
-# shellcheck disable=SC2329  # Overrides consumed by sourced functions.
-lw_wait_for_interface() { return 0; }
+# shellcheck disable=SC2329
+lw_ssid_visible() {
+  [ "$1" = wlan-test ] && [ "$2" = 'Install Net' ]
+}
 # shellcheck disable=SC2329
 lw_connect_wifi() {
-  printf '%s\n' connected >"${temp_root}/unexpected-connect"
+  [ "$1" = wlan-test ] && [ "$2" = 'Install Net' ] && [ "$3" = '123456789222aER$' ] && [ "$4" = wpa ] || return 1
+  : >"${auto_marker}"
 }
-printf '%s\n' '        SSID: OtherNetwork' >"${scan_file}"
-LIVE_WIFI_SSID=MissingNetwork \
-LIVE_WIFI_INTERFACE=wlan-test \
-LIVE_WIFI_SECURITY=open \
-  lw_main
-[ ! -e "${temp_root}/unexpected-connect" ] || fail "unavailable ESSID attempted association"
+# shellcheck disable=SC2329
+lw_configure_address() {
+  [ "$1" = wlan-test ] && [ "$2" = 192.0.2.44/24 ] && [ "$3" = 192.0.2.1 ] || return 1
+  : >"${address_marker}"
+}
+# shellcheck disable=SC2329
+lw_configure_nameservers() {
+  [ "$1" = wlan-test ] && [ "$2" = 192.0.2.53,198.51.100.53 ] || return 1
+  : >"${resolver_marker}"
+}
+lw_main
+[ -f "${auto_marker}" ] || fail "private Live environment did not trigger automatic Wi-Fi association"
+[ -f "${address_marker}" ] || fail "private Live environment did not apply configured addressing"
+[ -f "${resolver_marker}" ] || fail "private Live environment did not apply configured nameservers"
+
+# Missing ESSID must remain a harmless no-op.
+missing_essid_env=${temp_root}/missing-essid.env
+printf '%s\n' "LIVE_WIFI_INTERFACE='wlan-test'" "LIVE_WIFI_SECURITY='open'" >"${missing_essid_env}"
+chmod 0600 "${missing_essid_env}"
+DEBIAN_USB_LIVE_ENV_PATH=${missing_essid_env}
+export DEBIAN_USB_LIVE_ENV_PATH
+rm -f -- "${auto_marker}"
+lw_main
+[ ! -e "${auto_marker}" ] || fail "missing ESSID unexpectedly attempted association"

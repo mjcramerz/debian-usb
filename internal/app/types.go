@@ -11,12 +11,6 @@ type RuntimeConfig struct {
 	DefaultLiveMemGiB             int               `json:"default_live_mem_gib"`
 	DefaultLiveHooks              bool              `json:"default_live_hooks"`
 	DefaultLiveArgsHooks          string            `json:"default_live_args_hooks"`
-	DefaultLiveWifiInterface      string            `json:"default_live_wifi_interface"`
-	DefaultLiveWifiESSID          string            `json:"default_live_wifi_essid"`
-	DefaultLiveWifiSecurity       string            `json:"default_live_wifi_security"`
-	DefaultLiveWifiCIDR           string            `json:"default_live_wifi_cidr"`
-	DefaultLiveWifiGateway        string            `json:"default_live_wifi_gateway"`
-	DefaultLiveWifiNameservers    string            `json:"default_live_wifi_nameservers"`
 	DefaultPreseedPublicURL       string            `json:"default_preseed_public_url"`
 	DefaultPreseedPublicArgs      string            `json:"default_preseed_public_args"`
 	DefaultPreseedInternalArgs    string            `json:"default_preseed_internal_args"`

@@ -149,13 +149,22 @@ func TestResolveCreateSourcePathDownloadsTestingChannel(t *testing.T) {
 func TestCollectCreateRequestUsesDefaultKernelArgsWhenOverridingLiveConfig(t *testing.T) {
 	tempDir := t.TempDir()
 	helperPath := filepath.Join(tempDir, "helper.sh")
-	script := "#!/bin/sh\nset -eu\nIFS=$(printf '\\n\\t')\ncase \"${1-}\" in\n  list-local-isos) printf '[]\\n' ;;\n  inspect-iso) printf '{\"iso_path\":\"/tmp/example.iso\",\"volume_id\":\"example\",\"media_class\":\"hybrid\",\"firmware\":[\"uefi\"],\"managed_supported\":true,\"supports_persistence\":true,\"supports_encrypted_persistence\":true,\"managed_payload_layout\":\"iso-store\",\"top_level_entries\":[\"Live system (amd64)\"],\"best_live_title\":\"Live system (amd64)\",\"best_installer_title\":\"Automated install\",\"warnings\":[]}' ;;\n  *) printf 'unexpected command: %s\\n' \"${1-}\" >&2; exit 1 ;;\nesac\n"
+	script := "#!/bin/sh\nset -eu\nIFS=$(printf '\\n\\t')\ncase \"${1-}\" in\n  list-local-isos) printf '[]\\n' ;;\n  inspect-iso) printf '{\"iso_path\":\"/tmp/example.iso\",\"volume_id\":\"example\",\"media_class\":\"hybrid\",\"firmware\":[\"uefi\"],\"managed_supported\":true,\"supports_persistence\":true,\"supports_encrypted_persistence\":true,\"managed_payload_layout\":\"iso-store\",\"top_level_entries\":[\"Live system (amd64)\"],\"best_live_title\":\"Live system (amd64)\",\"best_installer_title\":\"Automated install\",\"warnings\":[]}' ;;\n  remaster-live-initrd-source) printf '{\"iso_path\":\"/tmp/example-live-overlay.iso\"}' ;;\n  *) printf 'unexpected command: %s\\n' \"${1-}\" >&2; exit 1 ;;\nesac\n"
 	if err := os.WriteFile(helperPath, []byte(script), 0755); err != nil {
 		t.Fatalf("write helper: %v", err)
 	}
 
+	initrdRoot := filepath.Join(tempDir, "initrd")
+	if err := os.MkdirAll(filepath.Join(initrdRoot, "debian", "live"), 0755); err != nil {
+		t.Fatalf("create Debian Live initrd overlay: %v", err)
+	}
+
 	application := App{
-		backend: &Backend{pythonHelper: helperPath},
+		backend: &Backend{
+			pythonHelper: helperPath,
+			initrdRoot:   initrdRoot,
+			effectiveUID: func() int { return 0 },
+		},
 		reader: bufio.NewReader(strings.NewReader(strings.Join([]string{
 			"1",
 			"/tmp/example.iso",
@@ -180,6 +189,9 @@ func TestCollectCreateRequestUsesDefaultKernelArgsWhenOverridingLiveConfig(t *te
 	if action != menuStay {
 		t.Fatalf("expected menuStay action, got %v", action)
 	}
+	if req.ISOPath != "/tmp/example-live-overlay.iso" {
+		t.Fatalf("expected required Debian Live initrd overlay remaster, got %q", req.ISOPath)
+	}
 	if !req.UseCustomGrubMenu {
 		t.Fatalf("expected custom GRUB menu prompt to default to enabled")
 	}
@@ -203,12 +215,21 @@ func TestCollectCreateRequestUsesDefaultKernelArgsWhenOverridingLiveConfig(t *te
 func TestCollectCreateRequestSupportsPerRunToramSelection(t *testing.T) {
 	tempDir := t.TempDir()
 	helperPath := filepath.Join(tempDir, "helper.sh")
-	script := "#!/bin/sh\nset -eu\nIFS=$(printf '\\n\\t')\ncase \"${1-}\" in\n  list-local-isos) printf '[]\\n' ;;\n  inspect-iso) printf '{\"iso_path\":\"/tmp/example.iso\",\"volume_id\":\"example\",\"media_class\":\"live\",\"firmware\":[\"uefi\"],\"managed_supported\":true,\"supports_persistence\":true,\"supports_encrypted_persistence\":false,\"managed_payload_layout\":\"iso-store\",\"top_level_entries\":[\"Live\"],\"best_live_title\":\"Live\",\"best_installer_title\":\"\",\"warnings\":[]}' ;;\n  *) printf 'unexpected command: %s\\n' \"${1-}\" >&2; exit 1 ;;\nesac\n"
+	script := "#!/bin/sh\nset -eu\nIFS=$(printf '\\n\\t')\ncase \"${1-}\" in\n  list-local-isos) printf '[]\\n' ;;\n  inspect-iso) printf '{\"iso_path\":\"/tmp/example.iso\",\"volume_id\":\"example\",\"media_class\":\"live\",\"firmware\":[\"uefi\"],\"managed_supported\":true,\"supports_persistence\":true,\"supports_encrypted_persistence\":false,\"managed_payload_layout\":\"iso-store\",\"top_level_entries\":[\"Live\"],\"best_live_title\":\"Live\",\"best_installer_title\":\"\",\"warnings\":[]}' ;;\n  remaster-live-initrd-source) printf '{\"iso_path\":\"/tmp/example-live-overlay.iso\"}' ;;\n  *) printf 'unexpected command: %s\\n' \"${1-}\" >&2; exit 1 ;;\nesac\n"
 	if err := os.WriteFile(helperPath, []byte(script), 0755); err != nil {
 		t.Fatalf("write helper: %v", err)
 	}
+	initrdRoot := filepath.Join(tempDir, "initrd")
+	if err := os.MkdirAll(filepath.Join(initrdRoot, "debian", "live"), 0755); err != nil {
+		t.Fatalf("create Debian Live initrd overlay: %v", err)
+	}
+
 	application := App{
-		backend: &Backend{pythonHelper: helperPath},
+		backend: &Backend{
+			pythonHelper: helperPath,
+			initrdRoot:   initrdRoot,
+			effectiveUID: func() int { return 0 },
+		},
 		reader: bufio.NewReader(strings.NewReader(strings.Join([]string{
 			"1",
 			"/tmp/example.iso",
@@ -232,6 +253,9 @@ func TestCollectCreateRequestSupportsPerRunToramSelection(t *testing.T) {
 	if action != menuStay {
 		t.Fatalf("expected menuStay action, got %v", action)
 	}
+	if req.ISOPath != "/tmp/example-live-overlay.iso" {
+		t.Fatalf("expected required Debian Live initrd overlay remaster, got %q", req.ISOPath)
+	}
 	if !req.UseCustomGrubMenu {
 		t.Fatalf("expected custom GRUB menu to stay enabled for the per-run flow")
 	}
@@ -243,6 +267,81 @@ func TestCollectCreateRequestSupportsPerRunToramSelection(t *testing.T) {
 	}
 	if req.KernelArgs != "" {
 		t.Fatalf("expected deterministic flow to skip manual live override kernel args, got %q", req.KernelArgs)
+	}
+}
+
+func TestPromptAndApplyLiveInitrdOverlayAutomaticallyUsesDebianLiveRoot(t *testing.T) {
+	tempDir := t.TempDir()
+	initrdRoot := filepath.Join(tempDir, "initrd")
+	overlayDir := filepath.Join(initrdRoot, "debian", "live")
+	if err := os.MkdirAll(overlayDir, 0755); err != nil {
+		t.Fatalf("create Debian Live initrd overlay: %v", err)
+	}
+	helperPath := filepath.Join(tempDir, "helper.sh")
+	argsPath := filepath.Join(tempDir, "remaster-args.txt")
+	t.Setenv("ARGS_PATH", argsPath)
+	script := `#!/bin/sh
+set -eu
+case "${1-}" in
+  remaster-live-initrd-source)
+    printf '%s\n' "$@" >"${ARGS_PATH}"
+    printf '{"iso_path":"/tmp/debian-live-overlay.iso"}'
+    ;;
+  inspect-iso)
+    printf '{"iso_path":"/tmp/debian-live-overlay.iso","volume_id":"overlay","media_class":"live","firmware":["uefi"],"managed_supported":true,"supports_persistence":true,"supports_encrypted_persistence":true,"managed_payload_layout":"iso-store","top_level_entries":["Live"],"best_live_title":"Live","best_installer_title":"","warnings":[]}'
+    ;;
+  *) exit 1 ;;
+esac
+`
+	if err := os.WriteFile(helperPath, []byte(script), 0755); err != nil {
+		t.Fatalf("write helper: %v", err)
+	}
+	application := App{
+		backend: &Backend{
+			pythonHelper: helperPath,
+			initrdRoot:   initrdRoot,
+			effectiveUID: func() int { return 0 },
+		},
+		reader: bufio.NewReader(strings.NewReader("")),
+	}
+	inspection := ISOInspection{
+		ISOPath:             "/tmp/source.iso",
+		MediaClass:          "live",
+		ManagedSupported:    true,
+		SupportsPersistence: true,
+	}
+
+	remasteredPath, remasteredInspection, action, err := application.promptAndApplyLiveInitrdOverlay(
+		profileSpecs[profileDebian],
+		"/tmp/source.iso",
+		inspection,
+	)
+	if err != nil {
+		t.Fatalf("apply required Debian Live initrd overlay: %v", err)
+	}
+	if action != menuStay {
+		t.Fatalf("expected menuStay, got %v", action)
+	}
+	if remasteredPath != "/tmp/debian-live-overlay.iso" {
+		t.Fatalf("unexpected remastered path: %q", remasteredPath)
+	}
+	if remasteredInspection.MediaClass != "live" {
+		t.Fatalf("unexpected remastered media class: %q", remasteredInspection.MediaClass)
+	}
+	argsRaw, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read remaster args: %v", err)
+	}
+	args := string(argsRaw)
+	for _, fragment := range []string{
+		"remaster-live-initrd-source",
+		"--profile\ndebian",
+		"--source-iso\n/tmp/source.iso",
+		"--overlay-dir\n" + overlayDir,
+	} {
+		if !strings.Contains(args, fragment) {
+			t.Fatalf("expected %q in remaster args: %s", fragment, args)
+		}
 	}
 }
 
@@ -432,7 +531,7 @@ func TestPromptManagedInstallerSourceStrategyAllowsSourceRebuildSelection(t *tes
 func TestCollectCreateRequestCanRemasterLiveSourceForEncryptedPersistence(t *testing.T) {
 	tempDir := t.TempDir()
 	helperPath := filepath.Join(tempDir, "helper.sh")
-	script := "#!/bin/sh\nset -eu\nIFS=$(printf '\\n\\t')\ncase \"${1-}\" in\n  list-local-isos) printf '[]\\n' ;;\n  inspect-iso)\n    iso_path=''\n    shift\n    while [ \"$#\" -gt 0 ]; do\n      if [ \"$1\" = '--iso-path' ]]; then iso_path=\"$2\"; break; fi\n      shift\n    done\n    if [ \"$iso_path\" = '/tmp/remastered.iso' ]; then\n      printf '{\"iso_path\":\"/tmp/remastered.iso\",\"volume_id\":\"remastered\",\"media_class\":\"hybrid\",\"firmware\":[\"uefi\"],\"managed_supported\":true,\"supports_persistence\":true,\"supports_encrypted_persistence\":true,\"managed_payload_layout\":\"iso-store\",\"top_level_entries\":[\"Live\"],\"best_live_title\":\"Live\",\"best_installer_title\":\"Install\",\"warnings\":[]}\\n'\n    else\n      printf '{\"iso_path\":\"/tmp/source.iso\",\"volume_id\":\"source\",\"media_class\":\"hybrid\",\"firmware\":[\"uefi\"],\"managed_supported\":true,\"supports_persistence\":true,\"supports_encrypted_persistence\":false,\"managed_payload_layout\":\"iso-store\",\"top_level_entries\":[\"Live\"],\"best_live_title\":\"Live\",\"best_installer_title\":\"Install\",\"warnings\":[]}\\n'\n    fi\n    ;;\n  remaster-live-persistence-source) printf '{\"iso_path\":\"/tmp/remastered.iso\"}\\n' ;;\n  *) printf 'unexpected command: %s\\n' \"${1-}\" >&2; exit 1 ;;\nesac\n"
+	script := "#!/bin/sh\nset -eu\nIFS=$(printf '\\n\\t')\ncase \"${1-}\" in\n  list-local-isos) printf '[]\\n' ;;\n  inspect-iso)\n    iso_path=''\n    shift\n    while [ \"$#\" -gt 0 ]; do\n      if [ \"$1\" = '--iso-path' ]]; then iso_path=\"$2\"; break; fi\n      shift\n    done\n    if [ \"$iso_path\" = '/tmp/remastered.iso' ]; then\n      printf '{\"iso_path\":\"/tmp/remastered.iso\",\"volume_id\":\"remastered\",\"media_class\":\"hybrid\",\"firmware\":[\"uefi\"],\"managed_supported\":true,\"supports_persistence\":true,\"supports_encrypted_persistence\":true,\"managed_payload_layout\":\"iso-store\",\"top_level_entries\":[\"Live\"],\"best_live_title\":\"Live\",\"best_installer_title\":\"Install\",\"warnings\":[]}\\n'\n    else\n      printf '{\"iso_path\":\"/tmp/source.iso\",\"volume_id\":\"source\",\"media_class\":\"hybrid\",\"firmware\":[\"uefi\"],\"managed_supported\":true,\"supports_persistence\":true,\"supports_encrypted_persistence\":false,\"managed_payload_layout\":\"iso-store\",\"top_level_entries\":[\"Live\"],\"best_live_title\":\"Live\",\"best_installer_title\":\"Install\",\"warnings\":[]}\\n'\n    fi\n    ;;\n  remaster-live-initrd-source) printf '{\"iso_path\":\"/tmp/source-live-overlay.iso\"}\\n' ;;\n  remaster-live-persistence-source) printf '{\"iso_path\":\"/tmp/remastered.iso\"}\\n' ;;\n  *) printf 'unexpected command: %s\\n' \"${1-}\" >&2; exit 1 ;;\nesac\n"
 	if err := os.WriteFile(helperPath, []byte(script), 0755); err != nil {
 		t.Fatalf("write helper: %v", err)
 	}
@@ -442,8 +541,16 @@ func TestCollectCreateRequestCanRemasterLiveSourceForEncryptedPersistence(t *tes
 	}
 	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
+	initrdRoot := filepath.Join(tempDir, "initrd")
+	if err := os.MkdirAll(filepath.Join(initrdRoot, "debian", "live"), 0755); err != nil {
+		t.Fatalf("create Debian Live initrd overlay: %v", err)
+	}
+
 	application := App{
-		backend: &Backend{pythonHelper: helperPath},
+		backend: &Backend{
+			pythonHelper: helperPath,
+			initrdRoot:   initrdRoot,
+		},
 		reader: bufio.NewReader(strings.NewReader(strings.Join([]string{
 			"1",
 			"/tmp/source.iso",
@@ -523,13 +630,22 @@ func TestCollectCreateRequestCanRemasterTailsSourceForEncryptedPersistence(t *te
 func TestCollectCreateRequestCapturesEncryptedPersistenceSettings(t *testing.T) {
 	tempDir := t.TempDir()
 	helperPath := filepath.Join(tempDir, "helper.sh")
-	script := "#!/bin/sh\nset -eu\nIFS=$(printf '\\n\\t')\ncase \"${1-}\" in\n  list-local-isos) printf '[]\\n' ;;\n  inspect-iso) printf '{\"iso_path\":\"/tmp/example.iso\",\"volume_id\":\"example\",\"media_class\":\"hybrid\",\"firmware\":[\"uefi\"],\"managed_supported\":true,\"supports_persistence\":true,\"supports_encrypted_persistence\":true,\"managed_payload_layout\":\"iso-store\",\"top_level_entries\":[\"Live\"],\"best_live_title\":\"Live\",\"best_installer_title\":\"Install\",\"warnings\":[]}' ;;\n  *) printf 'unexpected command: %s\\n' \"${1-}\" >&2; exit 1 ;;\nesac\n"
+	script := "#!/bin/sh\nset -eu\nIFS=$(printf '\\n\\t')\ncase \"${1-}\" in\n  list-local-isos) printf '[]\\n' ;;\n  inspect-iso) printf '{\"iso_path\":\"/tmp/example.iso\",\"volume_id\":\"example\",\"media_class\":\"hybrid\",\"firmware\":[\"uefi\"],\"managed_supported\":true,\"supports_persistence\":true,\"supports_encrypted_persistence\":true,\"managed_payload_layout\":\"iso-store\",\"top_level_entries\":[\"Live\"],\"best_live_title\":\"Live\",\"best_installer_title\":\"Install\",\"warnings\":[]}' ;;\n  remaster-live-initrd-source) printf '{\"iso_path\":\"/tmp/example-live-overlay.iso\"}' ;;\n  *) printf 'unexpected command: %s\\n' \"${1-}\" >&2; exit 1 ;;\nesac\n"
 	if err := os.WriteFile(helperPath, []byte(script), 0755); err != nil {
 		t.Fatalf("write helper: %v", err)
 	}
 
+	initrdRoot := filepath.Join(tempDir, "initrd")
+	if err := os.MkdirAll(filepath.Join(initrdRoot, "debian", "live"), 0755); err != nil {
+		t.Fatalf("create Debian Live initrd overlay: %v", err)
+	}
+
 	application := App{
-		backend: &Backend{pythonHelper: helperPath},
+		backend: &Backend{
+			pythonHelper: helperPath,
+			initrdRoot:   initrdRoot,
+			effectiveUID: func() int { return 0 },
+		},
 		reader: bufio.NewReader(strings.NewReader(strings.Join([]string{
 			"1",
 			"/tmp/example.iso",
@@ -553,6 +669,9 @@ func TestCollectCreateRequestCapturesEncryptedPersistenceSettings(t *testing.T) 
 	if action != menuStay {
 		t.Fatalf("expected menuStay action, got %v", action)
 	}
+	if req.ISOPath != "/tmp/example-live-overlay.iso" {
+		t.Fatalf("expected required Debian Live initrd overlay remaster, got %q", req.ISOPath)
+	}
 	if !req.Persistence {
 		t.Fatal("expected persistence to be enabled")
 	}
@@ -567,13 +686,22 @@ func TestCollectCreateRequestCapturesEncryptedPersistenceSettings(t *testing.T) 
 func TestCollectMultiOSItemCapturesPersistenceSettingsForPrimarySource(t *testing.T) {
 	tempDir := t.TempDir()
 	helperPath := filepath.Join(tempDir, "helper.sh")
-	script := "#!/bin/sh\nset -eu\nIFS=$(printf '\\n\\t')\ncase \"${1-}\" in\n  list-local-isos) printf '[]\\n' ;;\n  inspect-iso) printf '{\"iso_path\":\"/tmp/example.iso\",\"volume_id\":\"example\",\"media_class\":\"hybrid\",\"firmware\":[\"uefi\"],\"managed_supported\":true,\"supports_persistence\":true,\"supports_encrypted_persistence\":true,\"managed_payload_layout\":\"iso-store\",\"top_level_entries\":[\"Live\"],\"best_live_title\":\"Live\",\"best_installer_title\":\"Install\",\"warnings\":[]}' ;;\n  *) printf 'unexpected command: %s\\n' \"${1-}\" >&2; exit 1 ;;\nesac\n"
+	script := "#!/bin/sh\nset -eu\nIFS=$(printf '\\n\\t')\ncase \"${1-}\" in\n  list-local-isos) printf '[]\\n' ;;\n  inspect-iso) printf '{\"iso_path\":\"/tmp/example.iso\",\"volume_id\":\"example\",\"media_class\":\"hybrid\",\"firmware\":[\"uefi\"],\"managed_supported\":true,\"supports_persistence\":true,\"supports_encrypted_persistence\":true,\"managed_payload_layout\":\"iso-store\",\"top_level_entries\":[\"Live\"],\"best_live_title\":\"Live\",\"best_installer_title\":\"Install\",\"warnings\":[]}' ;;\n  remaster-live-initrd-source) printf '{\"iso_path\":\"/tmp/example-live-overlay.iso\"}' ;;\n  *) printf 'unexpected command: %s\\n' \"${1-}\" >&2; exit 1 ;;\nesac\n"
 	if err := os.WriteFile(helperPath, []byte(script), 0755); err != nil {
 		t.Fatalf("write helper: %v", err)
 	}
 
+	initrdRoot := filepath.Join(tempDir, "initrd")
+	if err := os.MkdirAll(filepath.Join(initrdRoot, "debian", "live"), 0755); err != nil {
+		t.Fatalf("create Debian Live initrd overlay: %v", err)
+	}
+
 	application := App{
-		backend: &Backend{pythonHelper: helperPath},
+		backend: &Backend{
+			pythonHelper: helperPath,
+			initrdRoot:   initrdRoot,
+			effectiveUID: func() int { return 0 },
+		},
 		reader: bufio.NewReader(strings.NewReader(strings.Join([]string{
 			"/tmp/example.iso",
 			"a",
@@ -593,6 +721,9 @@ func TestCollectMultiOSItemCapturesPersistenceSettingsForPrimarySource(t *testin
 	}
 	if action != menuStay {
 		t.Fatalf("expected menuStay action, got %v", action)
+	}
+	if item.ISOPath != "/tmp/example-live-overlay.iso" {
+		t.Fatalf("expected required Debian Live initrd overlay remaster, got %q", item.ISOPath)
 	}
 	if !item.Persistence {
 		t.Fatal("expected Multi-OS item persistence to be enabled")
@@ -814,7 +945,7 @@ func TestDefaultLiveKernelArgsApplyConfiguredSettings(t *testing.T) {
 	}
 
 	got := application.defaultLiveKernelArgs(profileSpecs["debian"], "plain")
-	want := "boot=live components quiet splash noeject base=1 policy=2 extra=3 toram=filesystem.squashfs mem=6G findiso=${isofile} persistence persistence-label=DEBIAN-PERSIST persistence-media=removable-usb"
+	want := "boot=live components quiet splash noeject base=1 policy=2 extra=3 live-config.hooks=medium toram=filesystem.squashfs mem=6G findiso=${isofile} persistence persistence-label=DEBIAN-PERSIST persistence-media=removable-usb persistence-storage=filesystem union=overlay"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
@@ -841,15 +972,9 @@ func TestDefaultInstallerKernelArgsRemoveLiveOnlyToram(t *testing.T) {
 func TestDefaultLiveKernelArgsApplyLiveHookSettingsWhenEnabled(t *testing.T) {
 	application := App{
 		config: RuntimeConfig{
-			DefaultBootPolicy:          "balanced",
-			DefaultLiveHooks:           true,
-			DefaultLiveArgsHooks:       "live-config.hooks=medium",
-			DefaultLiveWifiInterface:   "wlan0",
-			DefaultLiveWifiESSID:       "InstallNet",
-			DefaultLiveWifiSecurity:    "wpa",
-			DefaultLiveWifiCIDR:        "192.168.50.45/24",
-			DefaultLiveWifiGateway:     "192.168.50.1",
-			DefaultLiveWifiNameservers: "192.168.50.1,9.9.9.9",
+			DefaultBootPolicy:    "balanced",
+			DefaultLiveHooks:     true,
+			DefaultLiveArgsHooks: "live-config.hooks=medium",
 			ProfileFallbackLiveKernelArgs: map[string]string{
 				"debian": "boot=live components quiet splash noeject",
 			},
@@ -857,22 +982,12 @@ func TestDefaultLiveKernelArgsApplyLiveHookSettingsWhenEnabled(t *testing.T) {
 	}
 
 	got := application.defaultLiveKernelArgs(profileSpecs["debian"], "")
-	for _, token := range []string{
-		"live-config.hooks=medium",
-		"live_wifi_interface=wlan0",
-		"live_wifi_security=wpa",
-		"live_wifi_essid_b64=SW5zdGFsbE5ldA",
-		"live_wifi_cidr=192.168.50.45/24",
-		"live_wifi_gateway=192.168.50.1",
-		"live_wifi_nameservers=192.168.50.1,9.9.9.9",
-	} {
-		if !strings.Contains(got, token) {
-			t.Fatalf("expected %q in live args, got %q", token, got)
-		}
+	if !strings.Contains(got, "live-config.hooks=medium") {
+		t.Fatalf("expected mandatory Live hook selector in %q", got)
 	}
-	for _, forbidden := range []string{"live_wifi_psk=", "live_wifi_psk_b64=", "netcfg/wireless_wpa="} {
+	for _, forbidden := range []string{"live_wifi_", "LIVE_WIFI_", "netcfg/wireless_"} {
 		if strings.Contains(got, forbidden) {
-			t.Fatalf("expected Live Wi-Fi passphrase transport %q to stay out of kernel args, got %q", forbidden, got)
+			t.Fatalf("expected Live Wi-Fi transport %q to stay out of kernel args, got %q", forbidden, got)
 		}
 	}
 	kaliArgs := application.defaultLiveKernelArgs(profileSpecs[profileKaliLinux], "")

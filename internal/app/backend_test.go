@@ -21,9 +21,6 @@ func writeBackendLiveHookTestConfig(t *testing.T) string {
 		DefaultInstallerPolicy:    "preserve",
 		DefaultLiveHooks:          true,
 		DefaultLiveArgsHooks:      "live-config.hooks=medium",
-		DefaultLiveWifiInterface:  "wlan0",
-		DefaultLiveWifiESSID:      "InstallNet",
-		DefaultLiveWifiSecurity:   "wpa",
 		DefaultPreseedPublicURL:   "https://example.test/preseed.cfg",
 		DefaultPartitionLabels:    make(map[string]string, len(partitionLabelConfigKeys)),
 		ManagedSourceURLs:         make(map[string]string, len(managedSourceURLOrder)),
@@ -404,7 +401,7 @@ func TestExecuteCreateRemastersDebianLiveBeforeWriter(t *testing.T) {
 				"remaster-live-tools-source",
 				"--profile\ndebian",
 				"--source-iso\n"+sourceISOPath,
-				"--live-kernel-args\nlive-config.hooks=medium live_wifi_interface=wlan0 live_wifi_security=wpa live_wifi_essid_b64=SW5zdGFsbE5ldA",
+				"--live-kernel-args\nlive-config.hooks=medium",
 			) {
 				if !strings.Contains(remasterArgs, fragment) {
 					t.Fatalf("expected %q in remaster args:\n%s", fragment, remasterArgs)

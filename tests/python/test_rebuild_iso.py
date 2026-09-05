@@ -407,14 +407,26 @@ class RebuildISOTests(unittest.TestCase):
             versioned_initrd = iso_root / "live" / "initrd.img-6.1.0"
             live_root = workspace_dir / "live-root"
             rebuilt_initrd = live_root / "boot" / "initrd.img-6.1.0"
+            boot_config = iso_root / "boot" / "grub" / "grub.cfg"
             extracted_rootfs.parent.mkdir(parents=True, exist_ok=True)
             extracted_initrd.parent.mkdir(parents=True, exist_ok=True)
             versioned_initrd.parent.mkdir(parents=True, exist_ok=True)
             rebuilt_initrd.parent.mkdir(parents=True, exist_ok=True)
+            boot_config.parent.mkdir(parents=True, exist_ok=True)
             extracted_rootfs.write_text("rootfs", encoding="utf-8")
             extracted_initrd.write_text("old-initrd", encoding="utf-8")
             versioned_initrd.write_text("old-versioned-initrd", encoding="utf-8")
             rebuilt_initrd.write_text("new-initrd", encoding="utf-8")
+            boot_config.write_text(
+                "menuentry 'Live' {\n  linux /live/vmlinuz boot=live quiet ---\n}\n",
+                encoding="utf-8",
+            )
+            expected_packages = rebuild_iso._dedupe(
+                [
+                    *rebuild_iso.DEBIAN_LIVE_HOOK_PACKAGES,
+                    *rebuild_iso.LIVE_PERSISTENCE_SUPPORT_PACKAGES,
+                ]
+            )
 
             run_logged_calls: list[list[str]] = []
             run_in_chroot_calls: list[list[str]] = []
@@ -453,14 +465,35 @@ class RebuildISOTests(unittest.TestCase):
                                                 live_initrd_path="/live/initrd.img",
                                                 live_initrd_paths=["/live/initrd.img", "/live/initrd.img-6.1.0"],
                                                 live_kernel_path="/live/vmlinuz",
+                                                packages=expected_packages,
+                                                profile="debian",
                                                 iso_root=iso_root,
                                                 workspace_dir=workspace_dir,
                                                 log_file=None,
                                             )
 
-            self.assertEqual(modified, ["/live/filesystem.squashfs", "/live/initrd.img", "/live/initrd.img-6.1.0"])
-            self.assertEqual(install_calls, [rebuild_iso.LIVE_PERSISTENCE_SUPPORT_PACKAGES])
+            self.assertEqual(
+                modified,
+                [
+                    "/live/filesystem.squashfs",
+                    "/live/initrd.img",
+                    "/live/initrd.img-6.1.0",
+                    "/live/config-hooks/0500-apt-live-medium.sh",
+                    "/live/config-hooks/1000-network-wifi.sh",
+                    "/live/debian-usb-live.env",
+                    "/boot/grub/grub.cfg",
+                ],
+            )
+            self.assertEqual(install_calls, [expected_packages])
             self.assertEqual(install_roots, [iso_root])
+            self.assertEqual(
+                (live_root / "usr/share/initramfs-tools/conf.d/debian-usb-live").read_text(encoding="utf-8"),
+                "MODULES=most\n",
+            )
+            self.assertEqual(
+                (live_root / "etc/modules-load.d/debian-usb-live.conf").read_text(encoding="utf-8").splitlines(),
+                list(rebuild_iso.DEBIAN_LIVE_INITRAMFS_MODULES),
+            )
             self.assertIn(
                 [
                     "env",
@@ -476,6 +509,27 @@ class RebuildISOTests(unittest.TestCase):
             )
             self.assertEqual(extracted_initrd.read_text(encoding="utf-8"), "new-initrd")
             self.assertEqual(versioned_initrd.read_text(encoding="utf-8"), "new-initrd")
+            for hook_name in ("0500-apt-live-medium.sh", "1000-network-wifi.sh"):
+                hook_path = iso_root / "live" / "config-hooks" / hook_name
+                self.assertTrue(hook_path.is_file())
+                self.assertEqual(hook_path.stat().st_mode & 0o777, 0o755)
+            for wifi_path in (
+                live_root / "etc" / "debian-usb" / "live.env",
+                iso_root / "live" / "debian-usb-live.env",
+            ):
+                self.assertTrue(wifi_path.is_file())
+                self.assertEqual(wifi_path.stat().st_mode & 0o777, 0o600)
+                self.assertIn(
+                    "LIVE_WIFI_PASSPHRASE",
+                    {
+                        line.split("=", 1)[0]
+                        for line in wifi_path.read_text(encoding="utf-8").splitlines()
+                        if line and not line.startswith("#")
+                    },
+                )
+            boot_text = boot_config.read_text(encoding="utf-8")
+            self.assertIn("live-config.hooks=medium", boot_text)
+            self.assertNotIn("LIVE_WIFI_", boot_text)
             refresh_metadata.assert_called_once_with(live_root, iso_root, "/live/filesystem.squashfs")
             self.assertIn(
                 ["unsquashfs", "-processors", "2", "-d", str(live_root), str(extracted_rootfs)],
@@ -495,15 +549,286 @@ class RebuildISOTests(unittest.TestCase):
                 run_logged_calls,
             )
 
+    def test_apply_live_host_add_packages_enforces_debian_live_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            iso_root = root / "iso-root"
+            workspace_dir = root / "workspace"
+            live_root = workspace_dir / "live-root"
+            extracted_rootfs = iso_root / "live" / "filesystem.squashfs"
+            extracted_initrd = iso_root / "live" / "initrd.img"
+            versioned_initrd = iso_root / "live" / "initrd.img-6.1.0"
+            rebuilt_initrd = live_root / "boot" / "initrd.img-6.1.0"
+            boot_config = iso_root / "boot" / "grub" / "grub.cfg"
+            extracted_rootfs.parent.mkdir(parents=True, exist_ok=True)
+            rebuilt_initrd.parent.mkdir(parents=True, exist_ok=True)
+            boot_config.parent.mkdir(parents=True, exist_ok=True)
+            extracted_rootfs.write_text("rootfs", encoding="utf-8")
+            extracted_initrd.write_text("old-initrd", encoding="utf-8")
+            versioned_initrd.write_text("old-versioned-initrd", encoding="utf-8")
+            rebuilt_initrd.write_text("new-initrd", encoding="utf-8")
+            boot_config.write_text(
+                "menuentry 'Live' {\n  linux /live/vmlinuz boot=live quiet ---\n}\n",
+                encoding="utf-8",
+            )
+            plan = {
+                "action": "add-deb-packages",
+                "architecture": "",
+                "live_deb_packages": ["nmap"],
+            }
+            inspection = {
+                "architecture": "",
+                "live_rootfs_path": "/live/filesystem.squashfs",
+                "live_kernel_path": "/live/vmlinuz",
+                "live_kernel_paths": ["/live/vmlinuz"],
+                "live_initrd_path": "/live/initrd.img",
+                "live_initrd_paths": ["/live/initrd.img", "/live/initrd.img-6.1.0"],
+            }
+            expected_packages = rebuild_iso._dedupe(
+                [*rebuild_iso.DEBIAN_LIVE_HOOK_PACKAGES, "nmap"]
+            )
+            run_in_chroot_calls: list[list[str]] = []
+
+            with patch("debian_usb.rebuild_iso._squashfs_processor_count", return_value=2), patch(
+                "debian_usb.rebuild_iso._run_logged"
+            ), patch(
+                "debian_usb.rebuild_iso._install_packages_in_chroot"
+            ) as install_packages, patch(
+                "debian_usb.rebuild_iso._mounted_chroot",
+                return_value=nullcontext(),
+            ), patch(
+                "debian_usb.rebuild_iso._run_in_chroot",
+                side_effect=lambda _root, command, _log: run_in_chroot_calls.append(command),
+            ), patch(
+                "debian_usb.rebuild_iso._detect_live_root_kernel_version",
+                return_value="6.1.0",
+            ), patch(
+                "debian_usb.rebuild_iso._resolve_live_root_initrd_file",
+                return_value=rebuilt_initrd,
+            ), patch(
+                "debian_usb.rebuild_iso._refresh_live_metadata"
+            ) as refresh_metadata, patch(
+                "debian_usb.rebuild_iso._squashfs_compression",
+                return_value="xz",
+            ):
+                result = rebuild_iso._apply_live_host_rebuild_action(
+                    plan,
+                    inspection,
+                    iso_root,
+                    workspace_dir,
+                    root / "state",
+                    None,
+                )
+
+            install_packages.assert_called_once_with(
+                live_root,
+                expected_packages,
+                None,
+                apt_source_root=iso_root,
+            )
+            self.assertEqual(result["packages"], expected_packages)
+            self.assertEqual(
+                result["modified_paths"],
+                [
+                    "/live/filesystem.squashfs",
+                    "/live/initrd.img",
+                    "/live/initrd.img-6.1.0",
+                    "/live/config-hooks/0500-apt-live-medium.sh",
+                    "/live/config-hooks/1000-network-wifi.sh",
+                    "/live/debian-usb-live.env",
+                    "/boot/grub/grub.cfg",
+                ],
+            )
+            self.assertIn("flashrom", result["packages"])
+            self.assertIn("firmware-iwlwifi", result["packages"])
+            self.assertIn("wpasupplicant", result["packages"])
+            self.assertIn(
+                [
+                    "env",
+                    "DEBIAN_FRONTEND=noninteractive",
+                    "LANG=C.UTF-8",
+                    "LC_ALL=C.UTF-8",
+                    "update-initramfs",
+                    "-u",
+                    "-k",
+                    "all",
+                ],
+                run_in_chroot_calls,
+            )
+            self.assertEqual(extracted_initrd.read_text(encoding="utf-8"), "new-initrd")
+            self.assertEqual(versioned_initrd.read_text(encoding="utf-8"), "new-initrd")
+            expected_modules = "\n".join(rebuild_iso.DEBIAN_LIVE_INITRAMFS_MODULES) + "\n"
+            self.assertEqual(
+                (live_root / "usr/share/initramfs-tools/modules.d/debian-usb-live").read_text(
+                    encoding="utf-8"
+                ),
+                expected_modules,
+            )
+            self.assertEqual(
+                (live_root / "etc/modules-load.d/debian-usb-live.conf").read_text(
+                    encoding="utf-8"
+                ),
+                expected_modules,
+            )
+            for hook_name in ("0500-apt-live-medium.sh", "1000-network-wifi.sh"):
+                hook_path = iso_root / "live" / "config-hooks" / hook_name
+                self.assertTrue(hook_path.is_file())
+                self.assertEqual(hook_path.stat().st_mode & 0o777, 0o755)
+            for wifi_path in (
+                live_root / "etc" / "debian-usb" / "live.env",
+                iso_root / "live" / "debian-usb-live.env",
+            ):
+                self.assertTrue(wifi_path.is_file())
+                self.assertEqual(wifi_path.stat().st_mode & 0o777, 0o600)
+            boot_text = boot_config.read_text(encoding="utf-8")
+            self.assertIn("live-config.hooks=medium", boot_text)
+            self.assertNotIn("LIVE_WIFI_", boot_text)
+            refresh_metadata.assert_called_once_with(
+                live_root,
+                iso_root,
+                "/live/filesystem.squashfs",
+            )
+
+    def test_apply_live_host_replace_kernel_refreshes_all_live_members(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            iso_root = root / "iso-root"
+            workspace_dir = root / "workspace"
+            live_root = workspace_dir / "live-root"
+            extracted_rootfs = iso_root / "live" / "filesystem.squashfs"
+            rebuilt_kernel = live_root / "boot" / "vmlinuz-6.12.1-amd64"
+            rebuilt_initrd = live_root / "boot" / "initrd.img-6.12.1-amd64"
+            extracted_rootfs.parent.mkdir(parents=True, exist_ok=True)
+            rebuilt_kernel.parent.mkdir(parents=True, exist_ok=True)
+            extracted_rootfs.write_text("rootfs", encoding="utf-8")
+            rebuilt_kernel.write_text("new-kernel", encoding="utf-8")
+            rebuilt_initrd.write_text("new-initrd", encoding="utf-8")
+            plan = {
+                "action": "replace-kernel",
+                "architecture": "",
+                "target_kernel_version": "6.12.1-amd64",
+            }
+            inspection = {
+                "architecture": "",
+                "live_rootfs_path": "/live/filesystem.squashfs",
+                "live_kernel_path": "/live/vmlinuz",
+                "live_kernel_paths": ["/live/vmlinuz", "/live/vmlinuz-6.12.1-amd64"],
+                "live_initrd_path": "/live/initrd.img",
+                "live_initrd_paths": ["/live/initrd.img", "/live/initrd.img-6.12.1-amd64"],
+            }
+            expected_packages = rebuild_iso._dedupe(
+                [
+                    *rebuild_iso.DEBIAN_LIVE_HOOK_PACKAGES,
+                    "linux-image-6.12.1-amd64",
+                    "linux-headers-6.12.1-amd64",
+                ]
+            )
+            policy_paths = [
+                "/live/config-hooks/0500-apt-live-medium.sh",
+                "/live/config-hooks/1000-network-wifi.sh",
+                "/live/debian-usb-live.env",
+                "/boot/grub/grub.cfg",
+            ]
+
+            with patch("debian_usb.rebuild_iso._squashfs_processor_count", return_value=2), patch(
+                "debian_usb.rebuild_iso._run_logged"
+            ), patch(
+                "debian_usb.rebuild_iso.stage_live_systemd_masks"
+            ), patch(
+                "debian_usb.rebuild_iso._stage_debian_live_root_policy"
+            ) as stage_root_policy, patch(
+                "debian_usb.rebuild_iso._install_packages_in_chroot"
+            ) as install_packages, patch(
+                "debian_usb.rebuild_iso._mounted_chroot",
+                return_value=nullcontext(),
+            ), patch(
+                "debian_usb.rebuild_iso._run_in_chroot"
+            ) as run_in_chroot, patch(
+                "debian_usb.rebuild_iso._prune_live_kernel_versions"
+            ) as prune_versions, patch(
+                "debian_usb.rebuild_iso._resolve_live_root_kernel_file",
+                return_value=rebuilt_kernel,
+            ), patch(
+                "debian_usb.rebuild_iso._resolve_live_root_initrd_file",
+                return_value=rebuilt_initrd,
+            ), patch(
+                "debian_usb.rebuild_iso._stage_debian_live_iso_policy",
+                return_value=policy_paths,
+            ) as stage_iso_policy, patch(
+                "debian_usb.rebuild_iso._refresh_live_metadata"
+            ), patch(
+                "debian_usb.rebuild_iso._squashfs_compression",
+                return_value="xz",
+            ):
+                result = rebuild_iso._apply_live_host_rebuild_action(
+                    plan,
+                    inspection,
+                    iso_root,
+                    workspace_dir,
+                    root / "state",
+                    None,
+                )
+
+            stage_root_policy.assert_called_once_with(live_root)
+            install_packages.assert_called_once_with(
+                live_root,
+                expected_packages,
+                None,
+                apt_source_root=iso_root,
+            )
+            run_in_chroot.assert_called_once_with(
+                live_root,
+                [
+                    "env",
+                    "DEBIAN_FRONTEND=noninteractive",
+                    "LANG=C.UTF-8",
+                    "LC_ALL=C.UTF-8",
+                    "update-initramfs",
+                    "-u",
+                    "-k",
+                    "all",
+                ],
+                None,
+            )
+            prune_versions.assert_called_once_with(live_root, "6.12.1-amd64")
+            stage_iso_policy.assert_called_once_with(iso_root)
+            self.assertEqual(result["packages"], expected_packages)
+            self.assertEqual(
+                result["modified_paths"],
+                [
+                    "/live/filesystem.squashfs",
+                    "/live/vmlinuz",
+                    "/live/vmlinuz-6.12.1-amd64",
+                    "/live/initrd.img",
+                    "/live/initrd.img-6.12.1-amd64",
+                    *policy_paths,
+                ],
+            )
+            for member_path in inspection["live_kernel_paths"]:
+                self.assertEqual(
+                    (iso_root / member_path.lstrip("/")).read_text(encoding="utf-8"),
+                    "new-kernel",
+                )
+            for member_path in inspection["live_initrd_paths"]:
+                self.assertEqual(
+                    (iso_root / member_path.lstrip("/")).read_text(encoding="utf-8"),
+                    "new-initrd",
+                )
+
     def test_apply_live_tools_remaster_installs_profile_packages_and_repacks_squashfs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             iso_root = root / "iso-root"
             workspace_dir = root / "workspace"
             extracted_rootfs = iso_root / "live" / "filesystem.squashfs"
+            extracted_initrd = iso_root / "live" / "initrd.img"
             live_root = workspace_dir / "live-tools-root"
+            rebuilt_initrd = live_root / "boot" / "initrd.img-6.1.0"
             extracted_rootfs.parent.mkdir(parents=True, exist_ok=True)
+            rebuilt_initrd.parent.mkdir(parents=True, exist_ok=True)
             extracted_rootfs.write_text("rootfs", encoding="utf-8")
+            extracted_initrd.write_text("old-initrd", encoding="utf-8")
+            rebuilt_initrd.write_text("new-initrd", encoding="utf-8")
             run_logged_calls: list[list[str]] = []
 
             def fake_run_logged(command: list[str], **_: object) -> None:
@@ -519,24 +844,32 @@ class RebuildISOTests(unittest.TestCase):
 
             with patch("debian_usb.rebuild_iso._run_logged", side_effect=fake_run_logged):
                 with patch("debian_usb.rebuild_iso._install_packages_in_chroot") as install_packages:
-                    with patch("debian_usb.rebuild_iso._refresh_live_metadata") as refresh_metadata:
-                        with patch("debian_usb.rebuild_iso._squashfs_compression", return_value="xz"):
-                            modified = rebuild_iso._apply_live_tools_remaster(
-                                live_rootfs_path="/live/filesystem.squashfs",
-                                packages=["nvme-cli", "nmap"],
-                                profile="debian",
-                                iso_root=iso_root,
-                                workspace_dir=workspace_dir,
-                                log_file=None,
-                                processors=2,
-                            )
+                    with patch("debian_usb.rebuild_iso._mounted_chroot", return_value=nullcontext()):
+                        with patch("debian_usb.rebuild_iso._detect_live_root_kernel_version", return_value="6.1.0"):
+                            with patch("debian_usb.rebuild_iso._resolve_live_root_initrd_file", return_value=rebuilt_initrd):
+                                with patch("debian_usb.rebuild_iso._refresh_live_metadata") as refresh_metadata:
+                                    with patch("debian_usb.rebuild_iso._squashfs_compression", return_value="xz"):
+                                        modified = rebuild_iso._apply_live_tools_remaster(
+                                            live_rootfs_path="/live/filesystem.squashfs",
+                                            live_initrd_path="/live/initrd.img",
+                                            live_initrd_paths=["/live/initrd.img"],
+                                            live_kernel_path="/live/vmlinuz",
+                                            packages=["nvme-cli", "nmap"],
+                                            profile="debian",
+                                            iso_root=iso_root,
+                                            workspace_dir=workspace_dir,
+                                            log_file=None,
+                                            processors=2,
+                                        )
 
             self.assertEqual(
                 modified,
                 [
                     "/live/filesystem.squashfs",
+                    "/live/initrd.img",
                     "/live/config-hooks/0500-apt-live-medium.sh",
                     "/live/config-hooks/1000-network-wifi.sh",
+                    "/live/debian-usb-live.env",
                 ],
             )
             install_packages.assert_called_once_with(
@@ -545,6 +878,20 @@ class RebuildISOTests(unittest.TestCase):
                 None,
                 apt_source_root=iso_root,
             )
+            expected_modules = "\n".join(rebuild_iso.DEBIAN_LIVE_INITRAMFS_MODULES) + "\n"
+            self.assertEqual(
+                (live_root / "usr/share/initramfs-tools/modules.d/debian-usb-live").read_text(encoding="utf-8"),
+                expected_modules,
+            )
+            self.assertEqual(
+                (live_root / "usr/share/initramfs-tools/conf.d/debian-usb-live").read_text(encoding="utf-8"),
+                "MODULES=most\n",
+            )
+            self.assertEqual(
+                (live_root / "etc/modules-load.d/debian-usb-live.conf").read_text(encoding="utf-8"),
+                expected_modules,
+            )
+            self.assertEqual(extracted_initrd.read_text(encoding="utf-8"), "new-initrd")
             for unit in ("fwupd-refresh.service", "fwupd-refresh.timer"):
                 mask_path = live_root / "etc" / "systemd" / "system" / unit
                 self.assertTrue(mask_path.is_symlink())
@@ -596,6 +943,27 @@ class RebuildISOTests(unittest.TestCase):
                 hook_path = iso_root / "live" / "config-hooks" / hook_name
                 self.assertTrue(hook_path.is_file())
                 self.assertEqual(hook_path.stat().st_mode & 0o777, 0o755)
+            expected_wifi_keys = {
+                "LIVE_WIFI_INTERFACE",
+                "LIVE_WIFI_ESSID",
+                "LIVE_WIFI_SECURITY",
+                "LIVE_WIFI_CIDR",
+                "LIVE_WIFI_GATEWAY",
+                "LIVE_WIFI_NAMESERVERS",
+                "LIVE_WIFI_PASSPHRASE",
+            }
+            for wifi_path in (
+                live_root / "etc" / "debian-usb" / "live.env",
+                iso_root / "live" / "debian-usb-live.env",
+            ):
+                self.assertTrue(wifi_path.is_file())
+                self.assertEqual(wifi_path.stat().st_mode & 0o777, 0o600)
+                wifi_keys = {
+                    line.split("=", 1)[0]
+                    for line in wifi_path.read_text(encoding="utf-8").splitlines()
+                    if line and not line.startswith("#")
+                }
+                self.assertEqual(wifi_keys, expected_wifi_keys)
             self.assertIn(
                 ["unsquashfs", "-processors", "2", "-d", str(live_root), str(extracted_rootfs)],
                 run_logged_calls,
@@ -781,7 +1149,7 @@ class RebuildISOTests(unittest.TestCase):
 
             overlay = root / "overlay"
             overlay.mkdir()
-            (overlay / "live.env").write_text("PRESEED_WIFI_PASSPHRASE=''\n", encoding="utf-8")
+            (overlay / "live.env").write_text("LIVE_WIFI_PASSPHRASE=''\n", encoding="utf-8")
             manifest = rebuild_iso._merge_initrd_overlay_archive(
                 archive_path=archive,
                 overlay_dir=overlay,
@@ -798,7 +1166,7 @@ class RebuildISOTests(unittest.TestCase):
             self.assertEqual((extracted_main / "init").read_text(encoding="utf-8"), "#!/bin/sh\n")
             self.assertEqual(
                 (extracted_main / "live.env").read_text(encoding="utf-8"),
-                "PRESEED_WIFI_PASSPHRASE=''\n",
+                "LIVE_WIFI_PASSPHRASE=''\n",
             )
             self.assertEqual(manifest["embedded_root"], "/")
 
@@ -822,7 +1190,7 @@ class RebuildISOTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     (extracted_all / "live.env").read_text(encoding="utf-8"),
-                    "PRESEED_WIFI_PASSPHRASE=''\n",
+                    "LIVE_WIFI_PASSPHRASE=''\n",
                 )
 
     @patch("debian_usb.rebuild_iso._rewrite_checksum_files")
@@ -878,10 +1246,7 @@ class RebuildISOTests(unittest.TestCase):
                     "debian",
                     str(output_dir),
                     selected_groups=["nvme", "nmap"],
-                    live_kernel_args=(
-                        "live-config.hooks=medium "
-                        "live_wifi_essid_b64=SW5zdGFsbE5ldA"
-                    ),
+                    live_kernel_args="debian_usb.profile=test",
                 )
 
             self.assertEqual(source_iso.read_text(encoding="utf-8"), "source-bytes")
@@ -902,15 +1267,15 @@ class RebuildISOTests(unittest.TestCase):
             self.assertFalse(any(output_dir.rglob(".debian-usb-live-tools")))
             self.assertEqual(preflight_storage.call_count, 2)
             self.assertEqual(
-                result["live_kernel_arg_keys"],
-                ["live-config.hooks", "live_wifi_essid_b64"],
+                set(result["live_kernel_arg_keys"]),
+                {"debian_usb.profile", "live-config.hooks"},
             )
             for package in rebuild_iso.DEBIAN_LIVE_HOOK_PACKAGES:
                 self.assertIn(package, result["packages"])
             self.assertEqual(result["package_profile"]["package_count"], len(result["packages"]))
             self.assertTrue(Path(result["manifest_path"]).is_file())
             manifest_text = Path(result["manifest_path"]).read_text(encoding="utf-8")
-            self.assertNotIn("SW5zdGFsbE5ldA", manifest_text)
+            self.assertNotIn("live_wifi_", manifest_text)
             ensure_deps.assert_called_once_with()
             apply_tools.assert_called_once()
             self.assertEqual(apply_tools.call_args.kwargs["profile"], "debian")
@@ -1061,14 +1426,14 @@ class RebuildISOTests(unittest.TestCase):
 
             modified = rebuild_iso._patch_live_boot_configs(
                 iso_root,
-                "live-config.hooks=medium live_wifi_essid_b64=SW5zdGFsbE5ldA",
+                "live-config.hooks=medium debian_usb.profile=test",
             )
 
             grub_text = grub_path.read_text(encoding="utf-8")
             isolinux_text = isolinux_path.read_text(encoding="utf-8")
             second_modified = rebuild_iso._patch_live_boot_configs(
                 iso_root,
-                "live-config.hooks=medium live_wifi_essid_b64=SW5zdGFsbE5ldA",
+                "live-config.hooks=medium debian_usb.profile=test",
             )
             second_grub_text = grub_path.read_text(encoding="utf-8")
             second_isolinux_text = isolinux_path.read_text(encoding="utf-8")
@@ -1077,21 +1442,31 @@ class RebuildISOTests(unittest.TestCase):
         self.assertEqual(second_modified, [])
         self.assertEqual(second_grub_text, grub_text)
         self.assertEqual(second_isolinux_text, isolinux_text)
-        self.assertIn("live-config.hooks=medium live_wifi_essid_b64=SW5zdGFsbE5ldA ---", grub_text)
+        self.assertIn("live-config.hooks=medium debian_usb.profile=test ---", grub_text)
         self.assertIn("/install.amd/vmlinuz auto=true priority=critical ---", grub_text)
-        self.assertNotIn("live_wifi_essid_b64", grub_text.splitlines()[1])
+        self.assertNotIn("debian_usb.profile", grub_text.splitlines()[1])
         self.assertNotIn("live-config.hooks", grub_text.splitlines()[1])
-        self.assertIn("live_wifi_essid_b64=SW5zdGFsbE5ldA", isolinux_text)
+        self.assertIn("debian_usb.profile=test", isolinux_text)
 
     def test_validate_live_kernel_args_rejects_grub_command_separators(self) -> None:
         with self.assertRaisesRegex(ValueError, "invalid Live kernel argument token"):
             rebuild_iso._validate_live_kernel_args("live-config.hooks=medium; halt")
 
-    def test_validate_live_kernel_args_rejects_wifi_passphrase_transport(self) -> None:
-        with self.assertRaisesRegex(ValueError, "passphrase kernel arguments are forbidden"):
-            rebuild_iso._validate_live_kernel_args(
-                "live-config.hooks=medium live_wifi_psk_b64=cmV0aXJlZA"
-            )
+    def test_validate_live_kernel_args_rejects_all_wifi_transports(self) -> None:
+        forbidden = (
+            "live_wifi_psk_b64=cmV0aXJlZA",
+            "live_wifi_essid_b64=cmV0aXJlZA",
+            "LIVE_WIFI_ESSID=retired",
+            "DEFAULT_LIVE_WIFI_INTERFACE=wlan0",
+            "netcfg/wireless_essid=retired",
+            "netcfg/wireless_wpa=retired",
+        )
+        for argument in forbidden:
+            with self.subTest(argument=argument):
+                with self.assertRaisesRegex(ValueError, "Live Wi-Fi kernel arguments are forbidden"):
+                    rebuild_iso._validate_live_kernel_args(
+                        f"live-config.hooks=medium {argument}"
+                    )
 
     def test_remaster_live_tools_source_rejects_non_debian_hook_arguments_before_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -86,6 +86,7 @@ def minimal_netinst_plan(output_dir: str) -> dict[str, object]:
             "initramfs_modules": [],
             "kernel_inspection_modules": [],
             "kernel_config_symbols": [],
+            "module_alias_candidates": [],
             "storage_tool_packages": [],
         }
     )
@@ -112,6 +113,14 @@ class BuildISOTests(unittest.TestCase):
         self.assertIn("nmap", result["plan"]["storage_tool_packages"])
         for package in build_iso.DEBIAN_LIVE_HOOK_PACKAGES:
             self.assertIn(package, result["plan"]["base_packages"])
+        for module in build_iso.DEBIAN_LIVE_INITRAMFS_MODULES:
+            self.assertIn(module, result["plan"]["initramfs_modules"])
+            self.assertIn(module, result["plan"]["kernel_inspection_modules"])
+        for symbol in build_iso.DEBIAN_LIVE_KERNEL_CONFIG_SYMBOLS:
+            self.assertIn(symbol, result["plan"]["kernel_config_symbols"])
+        for alias in build_iso.DEBIAN_LIVE_MODULE_ALIAS_CANDIDATES:
+            self.assertIn(alias, result["plan"]["module_alias_candidates"])
+        self.assertIn("live-config.hooks=medium", result["plan"]["bootappend_live"].split())
         self.assertEqual(
             result["plan"]["live_tool_profile"]["package_count"],
             len(result["plan"]["storage_tool_packages"]),
@@ -169,6 +178,20 @@ class BuildISOTests(unittest.TestCase):
         option_index = command.index("--apt-indices")
         self.assertEqual(command[option_index + 1], "true")
 
+    def test_debian_live_bootappend_forces_medium_hooks_before_separator(self) -> None:
+        payload = minimal_plan("/tmp/out")
+        payload["bootappend_live"] = "quiet live-config.hooks=filesystem --- ignored=tail"
+
+        plan = build_iso._validate_build_iso_plan(payload)
+        tokens = plan["bootappend_live"].split()
+        separator_index = tokens.index("---")
+
+        self.assertIn("live-config.hooks=medium", tokens[:separator_index])
+        self.assertNotIn("live-config.hooks=filesystem", tokens)
+        self.assertEqual(tokens[separator_index + 1 :], ["ignored=tail"])
+        command = build_iso._lb_config_command(plan)
+        self.assertEqual(command[command.index("--bootappend-live") + 1], plan["bootappend_live"])
+
     def test_lb_config_command_live_tracks_trixie_and_forky_suite(self) -> None:
         for suite in ("trixie", "forky"):
             with self.subTest(suite=suite):
@@ -196,6 +219,11 @@ class BuildISOTests(unittest.TestCase):
         self.assertEqual(plan["rootfs_format"], "none")
         self.assertEqual(plan["live_tool_profile"], {})
         self.assertEqual(plan["storage_tool_packages"], [])
+        self.assertEqual(plan["bootappend_live"], "")
+        self.assertEqual(plan["initramfs_modules"], [])
+        self.assertEqual(plan["kernel_inspection_modules"], [])
+        self.assertEqual(plan["kernel_config_symbols"], [])
+        self.assertEqual(plan["module_alias_candidates"], [])
 
     def test_lb_config_command_netinst_tracks_trixie_and_forky_suite(self) -> None:
         for suite in ("trixie", "forky"):
@@ -254,6 +282,9 @@ class BuildISOTests(unittest.TestCase):
             self.assertFalse((build_root / "config/hooks/normal/7000-initramfs-modules.hook.chroot").exists())
             self.assertFalse((build_root / "config/hooks/normal/9990-erofs-rootfs.hook.binary").exists())
             self.assertFalse((build_root / "config/includes.binary/live").exists())
+            self.assertFalse(
+                (build_root / "config/includes.chroot_after_packages/etc/debian-usb/live.env").exists()
+            )
 
     def test_validate_live_apt_archive_accepts_release_packages_and_pool(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -334,7 +365,25 @@ class BuildISOTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             build_root = Path(temp_dir) / "live-build"
-            build_iso._materialize_workspace(build_root, plan, None, [])
+            live_env = Path(temp_dir) / "live.env"
+            live_env.write_text(
+                "\n".join(
+                    (
+                        "LIVE_WIFI_INTERFACE='wlan0'",
+                        "LIVE_WIFI_ESSID='Fixture Network'",
+                        "LIVE_WIFI_SECURITY='wpa'",
+                        "LIVE_WIFI_CIDR='192.0.2.10/24'",
+                        "LIVE_WIFI_GATEWAY='192.0.2.1'",
+                        "LIVE_WIFI_NAMESERVERS='192.0.2.1,198.51.100.53'",
+                        "LIVE_WIFI_PASSPHRASE='literal$Pass123'",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            live_env.chmod(0o600)
+            with patch.dict(build_iso.os.environ, {"DEBIAN_USB_LIVE_ENV_PATH": str(live_env)}):
+                build_iso._materialize_workspace(build_root, plan, None, [])
             chroot_packages = (build_root / "config" / "package-lists" / "base.list.chroot").read_text(
                 encoding="utf-8"
             ).splitlines()
@@ -346,6 +395,29 @@ class BuildISOTests(unittest.TestCase):
                 hook_name: (live_hooks_dir / hook_name).stat().st_mode & 0o777
                 for hook_name in ("0500-apt-live-medium.sh", "1000-network-wifi.sh")
             }
+            expected_wifi_keys = {
+                "LIVE_WIFI_INTERFACE",
+                "LIVE_WIFI_ESSID",
+                "LIVE_WIFI_SECURITY",
+                "LIVE_WIFI_CIDR",
+                "LIVE_WIFI_GATEWAY",
+                "LIVE_WIFI_NAMESERVERS",
+                "LIVE_WIFI_PASSPHRASE",
+            }
+            for wifi_path in (
+                build_root / "config/includes.chroot_after_packages/etc/debian-usb/live.env",
+                build_root / "config/includes.binary/live/debian-usb-live.env",
+            ):
+                self.assertTrue(wifi_path.is_file())
+                self.assertEqual(wifi_path.stat().st_mode & 0o777, 0o600)
+                wifi_text = wifi_path.read_text(encoding="utf-8")
+                wifi_keys = {
+                    line.split("=", 1)[0]
+                    for line in wifi_text.splitlines()
+                    if line and not line.startswith("#")
+                }
+                self.assertEqual(wifi_keys, expected_wifi_keys)
+                self.assertNotIn("PRESEED_WIFI_PASSPHRASE", wifi_text)
             for include_name in ("includes.chroot", "includes.chroot_after_packages"):
                 policy_root = build_root / "config" / include_name
                 for unit in ("fwupd-refresh.service", "fwupd-refresh.timer"):
@@ -360,6 +432,20 @@ class BuildISOTests(unittest.TestCase):
                     "LANG=en_US.UTF-8",
                     (policy_root / "etc" / "default" / "locale").read_text(encoding="utf-8").splitlines(),
                 )
+            module_policy_root = build_root / "config" / "includes.chroot_after_packages"
+            module_policy_paths = [
+                module_policy_root / "usr/share/initramfs-tools/modules.d/debian-usb-live",
+                module_policy_root / "usr/share/initramfs-tools/conf.d/debian-usb-live",
+                module_policy_root / "etc/modules-load.d/debian-usb-live.conf",
+            ]
+            expected_modules = "\n".join(plan["initramfs_modules"]) + "\n"
+            self.assertEqual(module_policy_paths[0].read_text(encoding="utf-8"), expected_modules)
+            self.assertEqual(module_policy_paths[1].read_text(encoding="utf-8"), "MODULES=most\n")
+            self.assertEqual(module_policy_paths[2].read_text(encoding="utf-8"), expected_modules)
+            self.assertEqual(
+                [module_path.stat().st_mode & 0o777 for module_path in module_policy_paths],
+                [0o644, 0o644, 0o644],
+            )
             policy_hook = build_root / "config" / "hooks" / "normal" / "6000-live-runtime-policy.hook.chroot"
             subprocess.run(["sh", "-n", str(policy_hook)], check=True)
             policy_hook_text = policy_hook.read_text(encoding="utf-8")
@@ -635,6 +721,55 @@ class BuildISOTests(unittest.TestCase):
             result = build_iso._validate_build_iso_plan(payload)
         self.assertEqual(result["direct_di_build_targets"], ["build_netboot", "build_cdrom"])
 
+    def test_scan_module_tree_recognizes_builtin_and_hyphenated_module_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            chroot_root = Path(temp_dir)
+            version_root = chroot_root / "lib/modules/6.12-test"
+            version_root.mkdir(parents=True)
+            (version_root / "modules.builtin").write_text(
+                "kernel/drivers/usb/storage/usb-storage.ko\n"
+                "kernel/drivers/md/dm-mod.ko\n"
+                "kernel/crypto/xxhash64-generic.ko\n",
+                encoding="utf-8",
+            )
+
+            result = build_iso._scan_module_tree(
+                chroot_root,
+                {"usb_storage", "dm_mod", "xxhash_generic"},
+                {"xxhash64_generic"},
+            )
+
+        self.assertEqual(result["requested_builtin"], ["dm_mod", "usb_storage"])
+        self.assertEqual(result["alias_builtin"], ["xxhash64_generic"])
+        self.assertEqual(result["requested_missing"], ["xxhash_generic"])
+        build_iso._enforce_debian_live_module_contract(
+            {
+                "module_root": result["module_root"],
+                "requested_matches": list(build_iso.DEBIAN_LIVE_INITRAMFS_MODULES),
+                "requested_builtin": [],
+                "requested_missing": [],
+                "alias_matches": [],
+                "alias_builtin": ["xxhash64_generic"],
+            }
+        )
+
+    def test_debian_live_module_contract_rejects_missing_modules(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "missing: ch341"):
+            build_iso._enforce_debian_live_module_contract(
+                {
+                    "module_root": "/fixture/lib/modules",
+                    "requested_matches": [
+                        module
+                        for module in build_iso.DEBIAN_LIVE_INITRAMFS_MODULES
+                        if module != "ch341"
+                    ],
+                    "requested_builtin": [],
+                    "requested_missing": ["ch341"],
+                    "alias_matches": [],
+                    "alias_builtin": [],
+                }
+            )
+
     def test_inspect_build_kernel_support_reads_explicit_module_tree_and_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -704,6 +839,53 @@ class BuildISOTests(unittest.TestCase):
         self.assertEqual(result["config_symbols"][0]["value"], "m")
         self.assertEqual(result["config_symbols"][1]["value"], "m")
 
+    def test_build_debian_iso_rejects_missing_live_modules_before_replacing_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            output_root = temp_root / "output"
+            output_root.mkdir()
+            final_iso = output_root / "custom.iso"
+            final_iso.write_text("existing-output", encoding="utf-8")
+            plan_path = temp_root / "plan.json"
+            payload = minimal_plan(str(output_root))
+            payload["installer_mode"] = "none"
+            payload["rootfs_format"] = "squashfs"
+            payload["filesystem_module_entries"] = []
+            payload["live_tool_groups"] = []
+            plan_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            def fake_run_logged(command: list[str], *, cwd: Path, log_file: object) -> None:
+                if command[:2] != ["lb", "build"]:
+                    return
+                (cwd / "live-image-amd64.hybrid.iso").write_text("invalid-new-iso", encoding="utf-8")
+                fixture_paths = (
+                    cwd / "binary/dists/trixie/Release",
+                    cwd / "binary/dists/trixie/main/binary-amd64/Packages.gz",
+                    cwd / "binary/pool/main/e/example/example_1_amd64.deb",
+                )
+                for fixture_path in fixture_paths:
+                    fixture_path.parent.mkdir(parents=True, exist_ok=True)
+                    fixture_path.write_text("fixture\n", encoding="utf-8")
+
+            with patch.object(build_iso, "DEFAULT_WORK_DIR", temp_root / "work"), patch.object(
+                build_iso,
+                "DEFAULT_STATE_DIR",
+                temp_root / "state",
+            ), patch.object(build_iso, "DEFAULT_LOG_DIR", temp_root / "log"), patch(
+                "debian_usb.build_iso._run_logged",
+                side_effect=fake_run_logged,
+            ), patch(
+                "debian_usb.build_iso._inspect_kernel_support",
+                return_value={},
+            ), patch(
+                "debian_usb.build_iso.ensure_debian_build_deps",
+                return_value={"changed": False},
+            ):
+                with self.assertRaisesRegex(RuntimeError, "Debian Live kernel module contract is incomplete"):
+                    build_iso.build_debian_iso(str(plan_path))
+
+            self.assertEqual(final_iso.read_text(encoding="utf-8"), "existing-output")
+
     def test_build_debian_iso_materializes_workspace_and_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
@@ -759,6 +941,18 @@ class BuildISOTests(unittest.TestCase):
                     (module_dir / "lib" / "xxhash.ko").write_text("", encoding="utf-8")
                     (module_dir / "crypto").mkdir(parents=True, exist_ok=True)
                     (module_dir / "crypto" / "xxhash_generic.ko").write_text("", encoding="utf-8")
+                    builtin_modules = [
+                        module
+                        for module in build_iso.DEBIAN_LIVE_INITRAMFS_MODULES
+                        if module not in {"xxhash", "xxhash_generic"}
+                    ]
+                    (module_dir.parent / "modules.builtin").write_text(
+                        "".join(
+                            f"kernel/builtin/{module.replace('_', '-')}.ko\n"
+                            for module in builtin_modules
+                        ),
+                        encoding="utf-8",
+                    )
 
             with patch.object(build_iso, "DEFAULT_WORK_DIR", work_root):
                 with patch.object(build_iso, "DEFAULT_STATE_DIR", state_root):
@@ -787,6 +981,8 @@ class BuildISOTests(unittest.TestCase):
             self.assertEqual(manifest["rootfs_format_actual"], "erofs")
             self.assertEqual(manifest["live_apt_archive"]["release_path"], "/dists/trixie/Release")
             self.assertIn("erofs", manifest["resolved_modules"]["requested_matches"])
+            self.assertIn("usb_storage", manifest["resolved_modules"]["requested_builtin"])
+            self.assertEqual(manifest["resolved_modules"]["requested_missing"], [])
             self.assertEqual(filesystem_module_path.read_text(encoding="utf-8").strip().splitlines(), ["filesystem.squashfs"])
             self.assertEqual(installer_audit["status"], "ok")
             self.assertEqual(installer_audit["local_udeb_count"], 1)

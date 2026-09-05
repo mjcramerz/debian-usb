@@ -82,6 +82,7 @@ The Debian build path:
 5. writes logs under `/var/log/debian-usb/build-iso/<run-id>.log`
 6. copies the finished ISO into `/data/downloads/debian-usb/iso/debian-live/` by default so the Create USB flow can discover it automatically
 7. keeps live-build APT indexes enabled, stages the Live administration profile into both the squashfs and the medium package archive, and refuses to publish an image unless its suite release plus an architecture package index for every populated `pool/` component are present
+8. scans the completed Debian Live kernel tree, including `*.ko*` files and `modules.builtin`, and refuses to replace the final output ISO unless the mandatory Live boot, compression, overlay, persistence, storage, and CH341 module contract is satisfied
 
 The bundled Debian Live and Debian Netinst profiles both prompt for the suite, so Trixie 13 and Forky 14 are selectable without switching to the advanced planner. The role contracts remain different: Live uses `--system live --debian-installer live`, while Netinst uses `--debian-installer netinst` and deliberately includes no `--system` option. `--binary-images iso-hybrid` selects only the output image format; it does not select the installer role, and this workflow has no `--debian-netinst` option. For both Debian profiles, the Debian Installer distribution follows the selected suite, so `trixie` and `forky` consistently drive both `--distribution` and `--debian-installer-distribution`. A Netinst plan must use `rootfs_format: "none"` and cannot contain Live base packages, Live specs, Live overlays, Live initramfs modules, Live filesystem-module entries, storage-tool packages for a Live chroot, a custom Live kernel, or `debian-installer-launcher`. The post-build validator rejects any Netinst result containing `/live`, `/casper`, Live boot entries, or a `live-installer` udeb instead of publishing it as Netinst media.
 
@@ -95,7 +96,7 @@ The Debian Build Custom ISO plan also now covers the live-build integration poin
 - `config/includes.installer` overlays for installer-side content
 - optional `config/bootloaders` overrides when the stock menus must be replaced
 - explicit `live/filesystem.module` ordering, with EROFS defaulting to `filesystem.squashfs`
-- repo-managed live and installer spec profiles under `configs/spec/`, including Debian defaults for EROFS, `xxhash`, and `xxhash_generic`
+- repo-managed live and installer spec profiles under `configs/spec/`, including Debian Live defaults for EROFS, xxhash/LZ4 compression, overlay persistence, USB storage, NVMe, device mapper/crypt, and CH341 serial support
 - a spec-driven UDEB rebuild path that can fetch Debian source with `apt source`, patch `debian/control`, build `.udeb` artifacts, and stage them into the live-build tree
 - an installer-side EROFS audit that tracks the d-i integration surface you intend to touch, including `build-config`, `kernel-wedge`, `iso-scan`, `partman-auto`, `partconf`, `os-prober`, and `rescue`
 
@@ -176,15 +177,28 @@ That kernel-specific rebuild path fetches the Debian `linux` source, applies any
 Repository-side install defaults now live under `configs/`:
 
 - `configs/install.env` controls install-time paths, package dependencies, and helper locations
-- `configs/debian-usb.conf` controls installed runtime defaults such as persistence size, per-profile installer URLs, boot policy, toram, Debian Live hook and Wi-Fi settings, shared live policy arguments, installer policy arguments, per-profile fallback live kernel lines, and per-profile live/install/forensics kernel extras
+- `configs/debian-usb.conf` controls installed runtime defaults such as persistence size, per-profile installer URLs, boot policy, toram, Debian Live hook settings, shared live policy arguments, installer policy arguments, per-profile fallback live kernel lines, and per-profile live/install/forensics kernel extras
+- `initrd/debian/live/live.env` is the sole source for Debian Live Wi-Fi interface, ESSID, security, addressing, resolver, and passphrase settings
 
 Edit those files before `make install` if you want the installed app to start with your preferred defaults. `configs/debian-usb.conf` is the install-time source of truth for the runtime knobs the managed planner and renderer consume. The app can still change the installed runtime config later through its Settings flow, including per-profile live, forensics, and installer kernel extras.
 
 Managed live and installer kernel behavior is controlled through Settings. The renderer merges the configured live, installer, forensics, and per-profile extras into curated and preserved entries during the managed render.
 
-Debian Live payloads receive repo-managed live-config hooks under `/live/config-hooks`. These hooks and their required runtime packages are staged into custom Debian Live builds and existing Debian Live remasters even when the user explicitly selects no optional administration tools. The mandatory set includes the link-management commands plus common Intel, Atheros, Realtek, Broadcom, MediaTek, and Libertas Wi-Fi firmware families. Kali, Ubuntu, Tails, Debian Netinst, and Debian Netboot do not receive the Debian APT or Wi-Fi hooks, firmware bundle, or kernel arguments.
+Debian Live payloads receive repo-managed live-config hooks under `/live/config-hooks`. These hooks and their required runtime packages are staged into custom Debian Live builds, existing Debian Live remasters, and raw Debian Live ISO payloads even when the user explicitly selects no optional administration tools. `live-config.hooks=medium` is mandatory on Debian Live boot entries so the medium hooks execute. `DEFAULT_LIVE_HOOKS` can gate only additional non-Wi-Fi tokens from `DEFAULT_LIVE_ARGS_HOOKS`; it cannot disable the managed APT/Wi-Fi hooks, and every canonical or legacy Wi-Fi kernel argument is stripped or rejected. Kali, Ubuntu, Tails, Debian Netinst, and Debian Netboot do not receive the Debian APT or Wi-Fi hooks, firmware bundle, or hook selector.
 
-At Debian Live boot, `0500-apt-live-medium.sh` first confirms `/etc/os-release` identifies Debian. It then empties `/etc/apt/sources.list`, removes every active `*.list` and `*.sources` fragment from `/etc/apt/sources.list.d`, and writes one deterministic Deb822 source:
+The Debian Live initramfs policy writes the explicit module list to `/usr/share/initramfs-tools/modules.d/debian-usb-live`, sets `MODULES=most` in `/usr/share/initramfs-tools/conf.d/debian-usb-live`, and mirrors the list to `/etc/modules-load.d/debian-usb-live.conf` for deterministic userspace loading. Existing-ISO remasters rebuild and replace every Live initrd referenced by a Live boot entry after staging this policy. The required module groups are:
+
+| Purpose | Modules |
+| --- | --- |
+| Compression and hashing | `xxhash`, `xxhash_generic`, `lz4`, `lz4_compress`, `lz4_decompress` |
+| Live root and full-root overlay | `loop`, `squashfs`, `overlay`, `ext4` |
+| Encrypted persistence | `dm_mod`, `dm_crypt` |
+| Removable and high-performance storage | `usb_storage`, `uas`, `nvme` |
+| CH341 serial devices | `usbserial`, `ch341` |
+
+Mandatory Debian Live packages include `initramfs-tools`, `kmod`, the `xxhash`, `lz4`, and `zstd` CLIs, USB/PCI/I2C inspection tools, `flashrom`, Intel microcode, Intel Wi-Fi/graphics/misc/sound/SOF firmware, and the existing broad Atheros, Realtek, Broadcom, MediaTek, Libertas, Linux, and Bluetooth firmware coverage. CH341 serial mode is handled by the kernel's `usbserial` and `ch341` modules. CH341A SPI programming is a userspace flashrom backend (`flashrom -p ch341a_spi`); this project does not invent or depend on a separate CH341A firmware package.
+
+At Debian Live boot, `0500-apt-live-medium.sh` first confirms `/etc/os-release` identifies Debian and validates the selected suite. It atomically filters legacy `.list` files and Deb822 `.sources` stanzas, removing only enabled Live-medium/CD-ROM URIs such as `file:/run/live/medium`, `file:/lib/live/mount/medium`, `file:/cdrom`, and `cdrom:`. HTTP/HTTPS repositories, disabled entries, source-only repositories, comments, file modes, and persistent custom repository changes are preserved. The hook creates one deterministic fallback Deb822 source only when no enabled binary HTTP/HTTPS source remains:
 
 | Field | Debian Live value |
 | --- | --- |
@@ -193,17 +207,34 @@ At Debian Live boot, `0500-apt-live-medium.sh` first confirms `/etc/os-release` 
 | Components | `main contrib non-free non-free-firmware` |
 | Keyring | `/usr/share/keyrings/debian-archive-keyring.gpg` |
 
-No `-updates` or `-security` suite is synthesized. A non-Debian root or an unsafe/missing suite is left unchanged rather than being assigned a guessed repository.
+No `-updates` or `-security` suite is synthesized. A non-Debian root or an unsafe/missing suite is left unchanged rather than being assigned a guessed repository. This removes the broken source that made APT probe missing `Packages.xz`, `Packages.bz2`, `Packages.lzma`, `Packages.gz`, `Packages.lz4`, `Packages.zst`, and uncompressed `Packages` files under `/run/live/medium`; installing more decompressor packages would not repair absent repository metadata.
 
-Debian Live GRUB entries carry only the enabled, non-secret `DEFAULT_LIVE_WIFI_*` settings to `1000-network-wifi.sh`; the ESSID uses the unpadded Base64URL token `live_wifi_essid_b64=` so whitespace or GRUB metacharacters cannot split it. The Wi-Fi passphrase is never emitted into generated GRUB or `/proc/cmdline`. When the Debian Live initrd overlay is selected, its POSIX `init-bottom` helper copies `/live.env` with mode `0600` to `/run/initramfs/debian-usb/live.env` before initramfs-tools moves `/run` into the final Live root. The Live hook parses only `PRESEED_WIFI_PASSPHRASE` from that file and never sources or evaluates it. If the overlay, handoff, or value is absent, secured Wi-Fi setup is skipped without failing the Live boot. Treat a remastered initrd containing a Wi-Fi passphrase as sensitive material.
+Debian Live Wi-Fi configuration comes only from `initrd/debian/live/live.env`:
 
-| `DEFAULT_LIVE_WIFI_SECURITY` | Live behavior |
+| Key | Debian Live behavior |
 | --- | --- |
-| `open` | Associate with `key_mgmt=NONE`; no passphrase is used. |
-| `wpa` | Use WPA2-PSK with `proto=RSN`; accept an 8-63 byte passphrase or 64-digit hexadecimal PSK. |
-| `sae` | Use WPA3-SAE with required management-frame protection. |
+| `LIVE_WIFI_INTERFACE` | Use the named Linux interface, or `auto` to select the first detected wireless interface. |
+| `LIVE_WIFI_ESSID` | Network name. An empty value disables automatic Wi-Fi setup. |
+| `LIVE_WIFI_SECURITY` | `open`, `wpa` for WPA2-PSK/RSN, or `sae` for WPA3-SAE with required management-frame protection. |
+| `LIVE_WIFI_CIDR` | Optional static IPv4 address/prefix. An empty value requests IPv4 through DHCP. |
+| `LIVE_WIFI_GATEWAY` | Optional static IPv4 default gateway; the Wi-Fi route is normalized to metric `600`. |
+| `LIVE_WIFI_NAMESERVERS` | Optional comma- or whitespace-separated IPv4 resolver list. |
+| `LIVE_WIFI_PASSPHRASE` | WPA2 accepts 8-63 UTF-8 bytes or a 64-digit hexadecimal PSK; SAE accepts 1-63 UTF-8 bytes; open networks ignore it. |
 
-An empty ESSID disables Wi-Fi setup and suppresses all Wi-Fi-specific kernel arguments. `open` security never reads a passphrase. A configured ESSID that is not visible is skipped without disturbing Ethernet or another established link. When Ethernet and Wi-Fi are both available, the hook leaves Ethernet connected, adds Wi-Fi independently, and normalizes the Wi-Fi default route to metric `600`; per-link DNS is prevented from replacing the resolver owned by another default-route interface.
+No Wi-Fi value is rendered into GRUB or `/proc/cmdline`. The build-side parser uses an exact key allowlist and never sources or evaluates the file. It rejects symlinks, non-regular or oversized files, unsupported or duplicate keys, malformed values, invalid interface/security/address data, and invalid WPA/SAE lengths. A source containing a passphrase must have mode `0600`. The direct raw-ISO writer runs the same validator before invoking `xorriso`; malformed or insecure input therefore fails before the ISO rebuild and before any USB-device mutation.
+
+Custom Debian Live builds and Debian Live persistence, Live Host, and administration-tool remasters atomically stage the canonical file with mode `0600` at both locations required by the runtime:
+
+```text
+Live squashfs root: /etc/debian-usb/live.env
+Live medium:        /live/debian-usb-live.env
+```
+
+The Debian Live Create and Multi-OS paths also apply `initrd/debian/live` automatically to every referenced Debian Live initrd; this overlay is required rather than prompted. Its POSIX `init-bottom` helper copies `/live.env` to `/run/initramfs/debian-usb/live.env` with mode `0600`. At boot, `1000-network-wifi.sh` checks the initramfs handoff first, then the squashfs copy and the standard Live-medium mount locations. It reads only the seven `LIVE_WIFI_*` assignments, does not use `source` or `eval`, never logs the passphrase, and skips safely when no ESSID or required credential is configured.
+
+When configured, the hook unblocks Wi-Fi, waits for the requested interface (or detects one), verifies that the ESSID is visible, generates a private `wpa_supplicant` configuration, performs bounded association, applies the static IPv4 settings or runs DHCP, installs the requested gateway, and applies the configured nameservers. Ethernet and any other established link remain up; Wi-Fi receives default-route metric `600`, and per-link DNS is prevented from displacing a resolver owned by another default-route interface.
+
+Mode `0600` prevents ordinary users in the running system or build tree from reading the file, but it does not encrypt the media. Any ISO or initrd containing `LIVE_WIFI_PASSPHRASE` must be treated as sensitive because a person with the image can extract it.
 
 ### Live recovery and administration tools
 
@@ -262,9 +293,9 @@ initrd/
 `-- tails/{live,netinst,netboot}/
 ```
 
-The Create flow asks `Include the contents of initrd/<family>/<stage> at the root ...?` independently for each selected Live, Netinst, or Netboot source. Opting in passes every entry below that one directory through `cpio` at `/` in only the matching initrd. Stage overlays have no required filenames, required assignments, fixed entry list, or allowed filesystem-object-kind schema. Netinst and Netboot rebuild their separately downloaded/copied `hd-media/initrd.gz` or `netboot/initrd.gz`; the opaque Netinst ISO and any initrd inside it are never unpacked or modified by the overlay flow. Live remastering changes only initrd members referenced by Live boot entries and excludes installer initrds found in hybrid media. For a concatenated Live initramfs, every leading early cpio segment, including CPU microcode, is preserved byte-for-byte; only the final main archive is unpacked and rebuilt with its detected original compression, and any target or checksum modes temporarily relaxed after xorriso extraction are restored before the output ISO is written. When a rebuild runs through `sudo`, the complete temporary ISO is assigned to the invoking `SUDO_UID:SUDO_GID` with mode `0600` before its atomic rename, and the repository-managed rebuild directory chain is restored to setgid mode `2770`; the following non-root inspection can therefore open the published ISO while failed builds still preserve any previous valid output. Privileged Netinst and Netboot source preparation likewise hands the completed bundle tree to `SUDO_UID:SUDO_GID` and restores only the managed `sources` ancestor chain to group-traversable setgid mode `2770`; caller-supplied output parents are not changed. The separate prompt to embed `configs/preseed/preseed-debian.cfg` or `configs/preseed/preseed-kali.cfg` as `/preseed.cfg` remains available after the stage-overlay prompt.
+For Debian Live, `initrd/debian/live` is required and applied automatically to every Live initrd referenced by the selected ISO. For Debian/Kali Netinst and Netboot plus non-Debian Live profiles, the Create flow continues to ask `Include the contents of initrd/<family>/<stage> at the root ...?` independently for each selected source. Opting in passes every entry below that one directory through `cpio` at `/` in only the matching initrd. Those generic optional stage overlays have no required filenames, required assignments, fixed entry list, or allowed filesystem-object-kind schema. Netinst and Netboot rebuild their separately downloaded/copied `hd-media/initrd.gz` or `netboot/initrd.gz`; the opaque Netinst ISO and any initrd inside it are never unpacked or modified by the overlay flow. Live remastering changes only initrd members referenced by Live boot entries and excludes installer initrds found in hybrid media. For a concatenated Live initramfs, every leading early cpio segment, including CPU microcode, is preserved byte-for-byte; only the final main archive is unpacked and rebuilt with its detected original compression, and any target or checksum modes temporarily relaxed after xorriso extraction are restored before the output ISO is written. When a rebuild runs through `sudo`, the complete temporary ISO is assigned to the invoking `SUDO_UID:SUDO_GID` with mode `0600` before its atomic rename, and the repository-managed rebuild directory chain is restored to setgid mode `2770`; the following non-root inspection can therefore open the published ISO while failed builds still preserve any previous valid output. Privileged Netinst and Netboot source preparation likewise hands the completed bundle tree to `SUDO_UID:SUDO_GID` and restores only the managed `sources` ancestor chain to group-traversable setgid mode `2770`; caller-supplied output parents are not changed. The separate prompt to embed `configs/preseed/preseed-debian.cfg` or `configs/preseed/preseed-kali.cfg` as `/preseed.cfg` remains available after the stage-overlay prompt.
 
-Debian Netinst managed values are stored in `initrd/debian/netinst/preseed.env`. `PRESEED_WIFI_PASSPHRASE` is shared with `initrd/debian/live/live.env`; `./secrets.sh --set` prompts for it once and writes the same value to both files when they are present. The retired `DEFAULT_LIVE_WIFI_PSK` config field is removed rather than rendered or prompted. Tracked assignments are intentionally empty; run `./secrets.sh --clear` to sanitize active files plus optional examples and backups that are present. Missing initrd env files, examples, backups, and individual assignments are not errors, and missing managed assignments are upserted in active files that are present. Migrated legacy names and Live Wi-Fi passphrase names are rejected in every GRUB kernel-argument config field.
+Debian Netinst managed values remain in `initrd/debian/netinst/preseed.env`, where its Wi-Fi credential remains `PRESEED_WIFI_PASSPHRASE`. Debian Live uses the separate `LIVE_WIFI_PASSPHRASE` assignment in `initrd/debian/live/live.env`. `./secrets.sh --set` prompts separately for both values and writes each only to its matching active file; it never copies the Netinst credential into Live or the Live credential into Netinst. The retired `DEFAULT_LIVE_WIFI_PSK` config field is removed rather than rendered or prompted. Before committing or pushing, run `./secrets.sh --clear` to sanitize active files plus optional examples and backups that are present. Missing initrd env files, examples, backups, and individual assignments are not errors, and missing managed assignments are upserted in active files that are present. Migrated legacy names and every Live Wi-Fi name are rejected in all GRUB kernel-argument config fields.
 
 | Former GRUB argument | Initrd environment field |
 | --- | --- |
@@ -399,7 +430,19 @@ If you build a managed Ubuntu live USB, the app does not hardcode a release-spec
 
 ## Persistence note
 
-- Debian and Kali persistence use the standard `persistence` label plus `persistence.conf`, and the generated kernel cmdline scopes persistence scanning to `persistence-media=removable-usb`.
+- Debian and Kali persistence templates contain one effective directive, `/ union`, so the writable overlay covers the complete root filesystem: newly installed packages, `/etc`, home directories, and other runtime changes persist.
+- Generated Debian/Kali live-boot arguments normalize stale persistence settings and use `persistence-media=removable-usb persistence-storage=filesystem union=overlay` together with the profile-specific persistence label. Plain and LUKS-backed ext4 persistence partitions therefore use the same full-root overlay contract.
+- RAM plus persistence keeps the immutable Live root filesystem in RAM through `toram=<detected-rootfs-module>` while the persistence filesystem remains the overlay upper/work layer:
+
+```text
+immutable Live rootfs --toram--> RAM
+                                 |
+                                 +-- overlay lowerdir
+persistence ext4 partition ------+-- overlay upper/work
+                                 |
+                                 +--> merged writable /
+```
+
 - Ubuntu Desktop persistence uses the documented `casper-rw` filesystem label, while the GPT partition name is set to `writable` for current Ubuntu persistent-media conventions.
 - Managed partition and filesystem label defaults are configurable in `configs/debian-usb.conf` through `DEFAULT_ESP_LABEL`, `DEFAULT_DEBIAN_{LIVE,NETINST,PERSIST}_LABEL`, `DEFAULT_KALI_{LIVE,NETINST,PERSIST}_LABEL`, `DEFAULT_KALI_PURPLE_NETINST_LABEL`, `DEFAULT_UBUNTU_{LIVE,NETINST,PERSIST}_LABEL`, and `DEFAULT_UBUNTU_PERSIST_PARTLABEL`.
 - Multi-OS planning prompts independently for each persistence-capable Live source. Every enabled source receives a dedicated ext4 or LUKS-backed partition starting at partition 3; netinst, netboot, and installer-only sources never receive persistence partitions.

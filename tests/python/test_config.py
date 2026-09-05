@@ -65,14 +65,26 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(payload["default_live_mem_gib"], 0)
             self.assertTrue(payload["default_live_hooks"])
             self.assertEqual(payload["default_live_args_hooks"], "live-config.hooks=medium")
-            self.assertEqual(payload["default_live_wifi_interface"], loaded["DEFAULT_LIVE_WIFI_INTERFACE"])
-            self.assertEqual(payload["default_live_wifi_essid"], loaded["DEFAULT_LIVE_WIFI_ESSID"])
-            self.assertEqual(payload["default_live_wifi_security"], loaded["DEFAULT_LIVE_WIFI_SECURITY"])
-            self.assertNotIn("default_live_wifi_psk", payload)
-            self.assertNotIn("DEFAULT_LIVE_WIFI_PSK", loaded)
-            self.assertEqual(payload["default_live_wifi_cidr"], loaded["DEFAULT_LIVE_WIFI_CIDR"])
-            self.assertEqual(payload["default_live_wifi_gateway"], loaded["DEFAULT_LIVE_WIFI_GATEWAY"])
-            self.assertEqual(payload["default_live_wifi_nameservers"], loaded["DEFAULT_LIVE_WIFI_NAMESERVERS"])
+            for key in (
+                "default_live_wifi_interface",
+                "default_live_wifi_essid",
+                "default_live_wifi_security",
+                "default_live_wifi_cidr",
+                "default_live_wifi_gateway",
+                "default_live_wifi_nameservers",
+                "default_live_wifi_psk",
+            ):
+                self.assertNotIn(key, payload)
+            for key in (
+                "DEFAULT_LIVE_WIFI_INTERFACE",
+                "DEFAULT_LIVE_WIFI_ESSID",
+                "DEFAULT_LIVE_WIFI_SECURITY",
+                "DEFAULT_LIVE_WIFI_CIDR",
+                "DEFAULT_LIVE_WIFI_GATEWAY",
+                "DEFAULT_LIVE_WIFI_NAMESERVERS",
+                "DEFAULT_LIVE_WIFI_PSK",
+            ):
+                self.assertNotIn(key, loaded)
             self.assertEqual(payload["debian_preseed_public_url"], loaded["DEBIAN_PRESEED_PUBLIC_URL"])
             self.assertEqual(payload["debian_preseed_public_args"], loaded["DEBIAN_PRESEED_PUBLIC_ARGS"])
             self.assertEqual(payload["debian_preseed_internal_args"], "")
@@ -225,20 +237,15 @@ class ConfigTests(unittest.TestCase):
             self.assertIn('DEFAULT_LIVE_ARGS_HOOKS="live-config.hooks=medium"', rendered)
             self.assertIn('DEFAULT_LIVE_KERNEL_EXTRAS="', rendered)
             self.assertEqual(saved["DEFAULT_LIVE_KERNEL_EXTRAS"], template["DEFAULT_LIVE_KERNEL_EXTRAS"])
-            self.assertIn('DEFAULT_LIVE_WIFI_SECURITY="', rendered)
-            self.assertEqual(saved["DEFAULT_LIVE_WIFI_SECURITY"], template["DEFAULT_LIVE_WIFI_SECURITY"])
-            self.assertNotIn("DEFAULT_LIVE_WIFI_PSK", rendered)
-            self.assertIn('DEFAULT_LIVE_WIFI_GATEWAY="', rendered)
-            self.assertEqual(saved["DEFAULT_LIVE_WIFI_GATEWAY"], template["DEFAULT_LIVE_WIFI_GATEWAY"])
+            self.assertNotIn("DEFAULT_LIVE_WIFI_", rendered)
+            self.assertFalse(any(key.startswith("DEFAULT_LIVE_WIFI_") for key in saved))
+            self.assertFalse(any(key.startswith("DEFAULT_LIVE_WIFI_") for key in template))
             self.assertIn('DEFAULT_ESP_LABEL="ESPBOOT"', rendered)
             self.assertIn('DEFAULT_DEBIAN_NETINST_LABEL="DEBIAN-NETINST"', rendered)
             self.assertIn('DEFAULT_DEBIAN_NETBOOT_LABEL="DEBIAN-NETBOOT"', rendered)
             self.assertIn('DEFAULT_KALI_NETINST_LABEL="KALI-NETINST"', rendered)
             self.assertIn('DEFAULT_KALI_NETBOOT_LABEL="KALI-NETBOOT"', rendered)
             self.assertIn('DEFAULT_UBUNTU_PERSIST_PARTLABEL="writable"', rendered)
-            self.assertIn('DEFAULT_LIVE_WIFI_INTERFACE="wlan0"', rendered)
-            self.assertIn('DEFAULT_LIVE_WIFI_ESSID="', rendered)
-            self.assertEqual(saved["DEFAULT_LIVE_WIFI_ESSID"], template["DEFAULT_LIVE_WIFI_ESSID"])
             self.assertNotIn("INITRD_REQUIRED_MODULES", rendered)
             self.assertIn('KALI_PURPLE_PRESEED_INTERNAL_URL="', rendered)
             self.assertEqual(
@@ -294,12 +301,6 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded["PRESEED_ELEVEN_ARGS_DEBIAN"], "classes=prod\\;test\\;dhcp\\;dualboot")
             self.assertIn('PRESEED_ELEVEN_ARGS_DEBIAN="classes=prod\\;test\\;dhcp\\;dualboot"', rendered)
 
-    def test_rejects_live_wifi_cidr_without_prefix(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "debian-usb.conf"
-            with self.assertRaisesRegex(ValueError, "DEFAULT_LIVE_WIFI_CIDR must include a CIDR prefix"):
-                save_config(str(config_path), {"DEFAULT_LIVE_WIFI_CIDR": "192.168.50.45"})
-
     def test_rejects_invalid_partition_labels(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "debian-usb.conf"
@@ -308,53 +309,52 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "DEFAULT_DEBIAN_LIVE_LABEL"):
                 save_config(str(config_path), {"DEFAULT_DEBIAN_LIVE_LABEL": "DEBIAN LIVE"})
 
-    def test_rejects_live_wifi_security_aliases(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "debian-usb.conf"
-            for alias in ("wpa2", "wpa3", "none", "psk"):
-                with self.subTest(alias=alias):
-                    with self.assertRaisesRegex(ValueError, "DEFAULT_LIVE_WIFI_SECURITY must be one of: open, wpa, sae"):
-                        save_config(str(config_path), {"DEFAULT_LIVE_WIFI_SECURITY": alias})
-
-    def test_rejects_live_wifi_interface_whitespace(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "debian-usb.conf"
-            with self.assertRaisesRegex(ValueError, "DEFAULT_LIVE_WIFI_INTERFACE must not contain whitespace"):
-                save_config(str(config_path), {"DEFAULT_LIVE_WIFI_INTERFACE": "wlan 0"})
-
-    def test_accepts_live_wifi_essid_whitespace_and_drops_retired_psk_field(self) -> None:
+    def test_drops_obsolete_global_live_wifi_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "debian-usb.conf"
             save_config(
                 str(config_path),
                 {
+                    "DEFAULT_LIVE_WIFI_INTERFACE": "wlan0",
                     "DEFAULT_LIVE_WIFI_ESSID": "Install Net",
-                    "DEFAULT_LIVE_WIFI_PSK": "retired-value",
+                    "DEFAULT_LIVE_WIFI_SECURITY": "wpa",
+                    "DEFAULT_LIVE_WIFI_CIDR": "192.168.50.45/24",
+                    "DEFAULT_LIVE_WIFI_GATEWAY": "192.168.50.1",
+                    "DEFAULT_LIVE_WIFI_NAMESERVERS": "192.168.50.1",
                 },
             )
             loaded = load_config(str(config_path))
-            self.assertEqual(loaded["DEFAULT_LIVE_WIFI_ESSID"], "Install Net")
-            self.assertNotIn("DEFAULT_LIVE_WIFI_PSK", loaded)
+            rendered = config_path.read_text(encoding="utf-8")
+            self.assertFalse(any(key.startswith("DEFAULT_LIVE_WIFI_") for key in loaded))
+            self.assertNotIn("DEFAULT_LIVE_WIFI_", rendered)
 
-    def test_rejects_overlong_live_wifi_essid(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "debian-usb.conf"
-            with self.assertRaisesRegex(ValueError, "must not exceed 32 UTF-8 bytes"):
-                save_config(str(config_path), {"DEFAULT_LIVE_WIFI_ESSID": "x" * 33})
-
-    def test_rejects_live_wifi_passphrase_kernel_arguments(self) -> None:
+    def test_rejects_all_live_wifi_kernel_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "debian-usb.conf"
             for name in (
                 "DEFAULT_LIVE_WIFI_PSK",
+                "LIVE_WIFI_INTERFACE",
+                "LIVE_WIFI_ESSID",
+                "LIVE_WIFI_SECURITY",
+                "LIVE_WIFI_CIDR",
+                "LIVE_WIFI_GATEWAY",
+                "LIVE_WIFI_NAMESERVERS",
+                "LIVE_WIFI_PASSPHRASE",
                 "PRESEED_WIFI_PASSPHRASE",
+                "live_wifi_interface",
+                "live_wifi_essid_b64",
+                "live_wifi_security",
+                "live_wifi_cidr",
+                "live_wifi_gateway",
+                "live_wifi_nameservers",
                 "live_wifi_psk",
                 "live_wifi_psk_b64",
                 "live_wifi_wpa",
+                "netcfg/wireless_essid",
                 "netcfg/wireless_wpa",
             ):
                 with self.subTest(name=name):
-                    with self.assertRaisesRegex(ValueError, "forbidden Live Wi-Fi passphrase"):
+                    with self.assertRaisesRegex(ValueError, "forbidden Live Wi-Fi kernel argument"):
                         save_config(
                             str(config_path),
                             {"DEFAULT_LIVE_ARGS_HOOKS": f"live-config.hooks=medium {name}=fixture"},
@@ -403,8 +403,6 @@ class ConfigTests(unittest.TestCase):
                         'DEBIAN_PRESEED_PUBLIC_ARGS="debian-installer/allow_unauthenticated_ssl=true"',
                         'DEBIAN_PRESEED_INTERNAL_ARGS=""',
                         'DEBIAN_PRESEED_INTERNAL_URL="https://example.test/debian-preseed.cfg"',
-                        'DEFAULT_LIVE_WIFI_INTERFACE="wlan0"',
-                        'DEFAULT_LIVE_WIFI_ESSID="InstallNet"',
                         'PRESEED_ONE_ARGS_DEBIAN="deb-one"',
                         'PRESEED_TWO_ARGS_DEBIAN="deb-two"',
                         'PRESEED_THREE_ARGS_DEBIAN="deb-three"',

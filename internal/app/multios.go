@@ -694,16 +694,20 @@ func normalizeMultiOSKernelArgs(spec profileSpec, kernelArgs, persistenceMode, p
 		return args
 	}
 	args = removeKernelArgsByExact(args, "ignore_uuid", "persistence", "nopersistence", "persistent=cryptsetup")
-	args = removeKernelArgsByPrefix(args, "uuid=", "findiso=", "fromiso=", "iso-scan/filename=", "persistence-label=", "persistence-encryption=", "persistence-media=")
+	args = removeKernelArgsByPrefix(
+		args,
+		"uuid=", "findiso=", "fromiso=", "iso-scan/filename=", "persistence-label=", "persistence-encryption=",
+		"persistence-media=", "persistence-storage=", "persistence-method=", "union=",
+	)
 	args = mergeKernelArgs(args, "findiso=${isofile}")
 	if spec.Key == profileTails {
 		return args
 	}
 	if persistenceMode == persistenceModeEncrypted {
 		if spec.Key == profileKaliLinux {
-			args = mergeKernelArgs(args, "persistent=cryptsetup persistence-encryption=luks persistence persistence-media=removable-usb")
+			args = mergeKernelArgs(args, "persistent=cryptsetup persistence-encryption=luks persistence persistence-media=removable-usb persistence-storage=filesystem union=overlay")
 		} else {
-			args = mergeKernelArgs(args, "persistence persistence-encryption=luks persistence-media=removable-usb")
+			args = mergeKernelArgs(args, "persistence persistence-encryption=luks persistence-media=removable-usb persistence-storage=filesystem union=overlay")
 		}
 		if persistenceLabel != "" {
 			args = mergeKernelArgs(args, "persistence-label="+persistenceLabel)
@@ -713,7 +717,7 @@ func normalizeMultiOSKernelArgs(spec profileSpec, kernelArgs, persistenceMode, p
 		if label == "" {
 			label = "persistence"
 		}
-		args = mergeKernelArgs(args, "persistence persistence-label="+label+" persistence-media=removable-usb")
+		args = mergeKernelArgs(args, "persistence persistence-label="+label+" persistence-media=removable-usb persistence-storage=filesystem union=overlay")
 	}
 	return args
 }

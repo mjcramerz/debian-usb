@@ -3,3 +3,4 @@ configs/debian-usb.conf.bak
 configs/debian-usb.conf.example
 examples/debian-usb.conf
 initrd/debian/netinst/*.asc
+apt-update

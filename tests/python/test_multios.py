@@ -204,6 +204,15 @@ class MultiOSTests(unittest.TestCase):
             self.assertIn("loopback loop $isofile", grub_cfg)
             self.assertIn("persistence-label=DEBIAN-PERSIST", grub_cfg)
             self.assertIn("persistence-label=KALI-PERSIST", grub_cfg)
+            entries = parse_grub_entries(grub_cfg, "boot/grub/grub.cfg")
+            for persistence_label in ("DEBIAN-PERSIST", "KALI-PERSIST"):
+                persistent_entry = next(
+                    entry
+                    for entry in entries
+                    if f"persistence-label={persistence_label}" in entry.kernel_args
+                )
+                self.assertIn("persistence-storage=filesystem", persistent_entry.kernel_args.split())
+                self.assertIn("union=overlay", persistent_entry.kernel_args.split())
 
     def test_render_shared_data_multios_isolates_live_iso_from_netinst_and_uses_persistence_label(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -788,8 +797,18 @@ menuentry 'Live system (amd64)' {
             with patch("debian_usb.multios.load_multios_plan", return_value=plan):
                 rendered = render_multios_grub("unused.json", "", {"os1": "DEBIAN-UUID", "os2": "KALI-UUID"})
             grub_cfg = rendered["grub_cfg"]
-            self.assertIn("toram", grub_cfg)
-            self.assertIn("persistence-label=DEBIAN-PERSIST", grub_cfg)
+            entries = parse_grub_entries(grub_cfg, "boot/grub/grub.cfg")
+            ram_persistence = next(
+                entry
+                for entry in entries
+                if "persistence-label=DEBIAN-PERSIST" in entry.kernel_args
+                and any(token.startswith("toram=") for token in entry.kernel_args.split())
+            )
+            tokens = ram_persistence.kernel_args.split()
+            self.assertIn("toram=filesystem.squashfs", tokens)
+            self.assertIn("persistence-label=DEBIAN-PERSIST", tokens)
+            self.assertIn("persistence-storage=filesystem", tokens)
+            self.assertIn("union=overlay", tokens)
 
     def test_render_multios_grub_adds_netinst_submenu_for_same_profile(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -455,13 +455,7 @@ func (b *Backend) remasterLiveToolsSource(profile, sourceISOPath string, groups 
 		args = append(args, "--no-tools")
 	}
 	if profile == profileDebian {
-		config, err := loadRuntimeConfig(b.configPath)
-		if err != nil {
-			return "", fmt.Errorf("load Debian Live hook configuration: %w", err)
-		}
-		if hookArgs := liveHookKernelArgsForConfig(config, profile); hookArgs != "" {
-			args = append(args, "--live-kernel-args", hookArgs)
-		}
+		args = append(args, "--live-kernel-args", mandatoryDebianLiveHookKernelArgs)
 	}
 	if err := b.runJSON(requireSudo, &payload, args...); err != nil {
 		return "", err

@@ -16,6 +16,7 @@ from typing import Iterable
 CONFIG_SECRET_KEYS = frozenset({"DEFAULT_LIVE_WIFI_PSK"})
 PRESEED_SECRET_KEYS = frozenset(
     {
+        "LIVE_WIFI_PASSPHRASE",
         "PRESEED_WIFI_PASSPHRASE",
         "PRESEED_FRUUX_USERNAME",
         "PRESEED_FRUUX_PASSWORD",

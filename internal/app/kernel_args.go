@@ -1,10 +1,11 @@
 package app
 
 import (
-	"encoding/base64"
 	"fmt"
 	"strings"
 )
+
+const mandatoryDebianLiveHookKernelArgs = "live-config.hooks=medium"
 
 func preseedCommonKernelArgs(config RuntimeConfig) string {
 	if config.ExtraValues == nil {
@@ -31,34 +32,6 @@ func (a *App) livePolicyKernelArgs() string {
 	return livePolicyKernelArgsForConfig(a.config)
 }
 
-func kernelArgAssignments(value string) map[string]string {
-	assignments := make(map[string]string)
-	for _, item := range strings.Fields(collapseWhitespace(value)) {
-		key, argValue, found := strings.Cut(item, "=")
-		if !found {
-			continue
-		}
-		assignments[key] = argValue
-	}
-	return assignments
-}
-
-func kernelArgAssignment(name string, value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || strings.ContainsAny(value, " \t\r\n") {
-		return ""
-	}
-	return name + "=" + value
-}
-
-func kernelArgBase64URLAssignment(name string, value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	return name + "=" + base64.RawURLEncoding.EncodeToString([]byte(value))
-}
-
 func removeSecretKernelArgs(kernelArgs string) string {
 	filtered := make([]string, 0, len(strings.Fields(kernelArgs)))
 	for _, item := range strings.Fields(collapseWhitespace(kernelArgs)) {
@@ -75,42 +48,14 @@ func removeSecretKernelArgs(kernelArgs string) string {
 }
 
 func liveHookKernelArgsForConfig(config RuntimeConfig, profile string) string {
-	if profile != profileDebian || !config.DefaultLiveHooks {
+	if profile != profileDebian {
 		return ""
 	}
-	additions := []string{}
-	if hookArgs := removeSecretKernelArgs(config.DefaultLiveArgsHooks); hookArgs != "" {
-		additions = append(additions, strings.Fields(hookArgs)...)
+	optionalArgs := ""
+	if config.DefaultLiveHooks {
+		optionalArgs = removeSecretKernelArgs(config.DefaultLiveArgsHooks)
 	}
-	if strings.TrimSpace(config.DefaultLiveWifiESSID) == "" {
-		return collapseWhitespace(strings.Join(additions, " "))
-	}
-	for _, item := range []struct {
-		name  string
-		value string
-	}{
-		{"live_wifi_interface", config.DefaultLiveWifiInterface},
-		{"live_wifi_security", config.DefaultLiveWifiSecurity},
-		{"live_wifi_cidr", config.DefaultLiveWifiCIDR},
-		{"live_wifi_gateway", config.DefaultLiveWifiGateway},
-		{"live_wifi_nameservers", config.DefaultLiveWifiNameservers},
-	} {
-		if assignment := kernelArgAssignment(item.name, item.value); assignment != "" {
-			additions = append(additions, assignment)
-		}
-	}
-	encodedValues := []struct {
-		name  string
-		value string
-	}{
-		{"live_wifi_essid_b64", config.DefaultLiveWifiESSID},
-	}
-	for _, item := range encodedValues {
-		if assignment := kernelArgBase64URLAssignment(item.name, item.value); assignment != "" {
-			additions = append(additions, assignment)
-		}
-	}
-	return collapseWhitespace(strings.Join(additions, " "))
+	return mergeKernelArgs(optionalArgs, mandatoryDebianLiveHookKernelArgs)
 }
 
 func applyLiveHookKernelArgsToBuildPlan(config RuntimeConfig, plan *BuildISOPlan) {
@@ -176,16 +121,20 @@ func defaultLiveKernelArgsForSelection(config RuntimeConfig, spec profileSpec, p
 		return removeSecretKernelArgs(args)
 	}
 	args = removeKernelArgsByExact(args, "ignore_uuid", "persistence", "nopersistence", "persistent=cryptsetup")
-	args = removeKernelArgsByPrefix(args, "uuid=", "findiso=", "fromiso=", "iso-scan/filename=", "persistence-label=", "persistence-encryption=", "persistence-media=")
+	args = removeKernelArgsByPrefix(
+		args,
+		"uuid=", "findiso=", "fromiso=", "iso-scan/filename=", "persistence-label=", "persistence-encryption=",
+		"persistence-media=", "persistence-storage=", "persistence-method=", "union=",
+	)
 	args = mergeKernelArgs(args, "findiso=${isofile}")
 	if spec.Key == profileTails {
 		return removeSecretKernelArgs(args)
 	}
 	if persistenceMode == "encrypted" {
 		if spec.Key == profileKaliLinux {
-			args = mergeKernelArgs(args, "persistent=cryptsetup persistence-encryption=luks persistence persistence-media=removable-usb")
+			args = mergeKernelArgs(args, "persistent=cryptsetup persistence-encryption=luks persistence persistence-media=removable-usb persistence-storage=filesystem union=overlay")
 		} else {
-			args = mergeKernelArgs(args, "persistence persistence-encryption=luks persistence-media=removable-usb")
+			args = mergeKernelArgs(args, "persistence persistence-encryption=luks persistence-media=removable-usb persistence-storage=filesystem union=overlay")
 		}
 		if fsLabel, _ := managedPersistenceLabels(config, spec.Key); fsLabel != "" {
 			args = mergeKernelArgs(args, "persistence-label="+fsLabel)
@@ -195,7 +144,7 @@ func defaultLiveKernelArgsForSelection(config RuntimeConfig, spec profileSpec, p
 		if fsLabel == "" {
 			fsLabel = "persistence"
 		}
-		args = mergeKernelArgs(args, "persistence persistence-label="+fsLabel+" persistence-media=removable-usb")
+		args = mergeKernelArgs(args, "persistence persistence-label="+fsLabel+" persistence-media=removable-usb persistence-storage=filesystem union=overlay")
 	}
 	return removeSecretKernelArgs(args)
 }

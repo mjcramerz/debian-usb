@@ -2,11 +2,21 @@ package app
 
 import (
 	"bufio"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func buildISOTestContains(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
 
 func TestParseDelimitedValuesDeduplicatesAndPreservesOrder(t *testing.T) {
 	got := parseDelimitedValues(" live-build, erofs-utils  live-build xorriso ")
@@ -43,6 +53,39 @@ func TestResolveOptionalExistingDirRejectsFiles(t *testing.T) {
 	_, err := resolveOptionalExistingDir(filePath)
 	if err == nil {
 		t.Fatalf("expected resolveOptionalExistingDir to reject a file path")
+	}
+}
+
+func TestBundledDebianLiveProfileCarriesMandatoryRuntimePolicy(t *testing.T) {
+	profile, ok := bundledBuildISOProfileByKey("debian-live")
+	if !ok {
+		t.Fatal("missing bundled Debian Live profile")
+	}
+	payload, err := os.ReadFile(filepath.Join("..", "..", "configs", "spec", profile.JSONRelPath))
+	if err != nil {
+		t.Fatalf("read bundled Debian Live profile: %v", err)
+	}
+	var plan BuildISOPlan
+	if err := json.Unmarshal(payload, &plan); err != nil {
+		t.Fatalf("parse bundled Debian Live profile: %v", err)
+	}
+	if plan.LiveBootAppend != mandatoryDebianLiveHookKernelArgs {
+		t.Fatalf("expected mandatory Live hook selector, got %q", plan.LiveBootAppend)
+	}
+	for _, module := range defaultBuildISOInitramfsModules {
+		if !buildISOTestContains(plan.InitramfsModules, module) || !buildISOTestContains(plan.KernelInspectionModules, module) {
+			t.Fatalf("bundled Debian Live profile is missing module %q: %#v", module, plan.InitramfsModules)
+		}
+	}
+	for _, symbol := range defaultBuildISOKernelConfigSymbols {
+		if !buildISOTestContains(plan.KernelConfigSymbols, symbol) {
+			t.Fatalf("bundled Debian Live profile is missing CONFIG symbol %q", symbol)
+		}
+	}
+	for _, packageName := range []string{"firmware-iwlwifi", "firmware-intel-graphics", "firmware-intel-misc", "firmware-intel-sound", "firmware-sof-signed", "intel-microcode", "flashrom", "xxhash", "lz4", "zstd"} {
+		if !buildISOTestContains(plan.BasePackages, packageName) {
+			t.Fatalf("bundled Debian Live profile is missing package %q", packageName)
+		}
 	}
 }
 
@@ -233,6 +276,9 @@ func TestCollectDebianBuildISOPlanKeepsNetinstFreeOfLiveInputs(t *testing.T) {
 	}
 	if plan.LiveModuleSpecPath != "" || plan.LiveDebSpecPath != "" || plan.LiveUdebSpecPath != "" || plan.LiveIncludeDir != "" {
 		t.Fatalf("netinst plan retained live specs or overlays: %#v", plan)
+	}
+	if len(plan.KernelInspectionModules) != 0 || len(plan.KernelConfigSymbols) != 0 {
+		t.Fatalf("netinst plan retained live kernel inspection policy: %#v", plan)
 	}
 	if plan.IncludeInstallerLauncher || plan.KernelMode != buildISOKernelModeStockDebian {
 		t.Fatalf("netinst plan retained live launcher or kernel settings: %#v", plan)

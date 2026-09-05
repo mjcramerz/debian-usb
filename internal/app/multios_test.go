@@ -319,8 +319,9 @@ func TestBuildMultiOSPlanUsesConfiguredPartitionLabels(t *testing.T) {
 	if got := plan.Items[0].PersistenceFSLabel; got != "DEB-PERSIST" {
 		t.Fatalf("expected configured persistence label, got %q", got)
 	}
-	if got := plan.Items[0].KernelArgs; !strings.Contains(got, "persistence-label=DEB-PERSIST") {
-		t.Fatalf("expected configured persistence label in kernel args, got %q", got)
+	if got := plan.Items[0].KernelArgs; !strings.Contains(got, "persistence-label=DEB-PERSIST") ||
+		!strings.Contains(got, "persistence-storage=filesystem") || !strings.Contains(got, "union=overlay") {
+		t.Fatalf("expected full-root filesystem overlay persistence args, got %q", got)
 	}
 }
 

@@ -218,7 +218,7 @@ actual_render_args=$(cat -- "${render_args}")
   fail "Multi-OS renderer did not preserve one --payload-uuid argument per item"
 export DEBIAN_USB_PYTHON_HELPER="${helper}"
 
-export DEFAULT_LIVE_HOOKS=1
+export DEFAULT_LIVE_HOOKS=0
 export DEBIAN_USB_LIVE_HOOKS_DIR="${repo_root}/config-hooks"
 duw_raw_iso_has_live_hook_target() {
   return 0
@@ -229,6 +229,136 @@ hook_args=$(duw_collect_live_hook_map_args "${source_iso}" kali-linux)
 [ -z "${hook_args}" ] || fail "Kali raw ISO unexpectedly received Debian Live hooks"
 hook_args=$(duw_collect_live_hook_map_args "${source_iso}" debian)
 [ -n "${hook_args}" ] || fail "Debian raw ISO did not receive live hooks"
+
+preflight_log="${temp_root}/live-env-preflight.log"
+(
+  # shellcheck disable=SC2329  # Invoked indirectly by a sourced writer function.
+  duw_live_env_source_path() {
+    printf '%s\n' /tmp/private-live.env
+  }
+  # shellcheck disable=SC2329  # Invoked indirectly by a sourced writer function.
+  duw_validate_live_env_file() {
+    printf '%s\n' "$1" >"${preflight_log}"
+  }
+  duw_preflight_debian_live_env_for_raw_payload debian primary live raw-iso
+)
+[ "$(cat -- "${preflight_log}")" = /tmp/private-live.env ] || \
+  fail "Debian Live raw payload did not preflight its private Wi-Fi file"
+rm -f -- "${preflight_log}"
+(
+  # shellcheck disable=SC2329  # Invoked indirectly by a sourced writer function.
+  duw_validate_live_env_file() {
+    printf 'unexpected\n' >"${preflight_log}"
+  }
+  duw_preflight_debian_live_env_for_raw_payload kali-linux primary live raw-iso
+  duw_preflight_debian_live_env_for_raw_payload debian netinst installer raw-iso
+  duw_preflight_debian_live_env_for_raw_payload debian primary live iso-store
+)
+[ ! -e "${preflight_log}" ] || fail "non-Debian-Live raw payload requested Live Wi-Fi validation"
+
+live_env_fixture="${temp_root}/debian-live.env"
+cat >"${live_env_fixture}" <<'EOF'
+LIVE_WIFI_INTERFACE='wlan0'
+LIVE_WIFI_ESSID='Fixture Network'
+LIVE_WIFI_SECURITY='wpa'
+LIVE_WIFI_CIDR='192.0.2.10/24'
+LIVE_WIFI_GATEWAY='192.0.2.1'
+LIVE_WIFI_NAMESERVERS='192.0.2.1,198.51.100.53'
+LIVE_WIFI_PASSPHRASE='literal$Pass123'
+EOF
+chmod 0600 "${live_env_fixture}"
+validator_helper="${temp_root}/validate-live-env-helper"
+validator_log="${temp_root}/validate-live-env.log"
+raw_xorriso_log="${temp_root}/raw-xorriso.log"
+raw_output_iso="${temp_root}/raw-output.iso"
+cat >"${validator_helper}" <<'EOF'
+#!/bin/sh
+set -eu
+printf '%s\n' "$@" >"${VALIDATOR_LOG}"
+exec "${REAL_PYTHON_HELPER}" "$@"
+EOF
+chmod 0755 "${validator_helper}"
+(
+  # shellcheck disable=SC2030  # Intentionally scoped to this isolated test case.
+  export DEBIAN_USB_PYTHON_HELPER="${validator_helper}"
+  # shellcheck disable=SC2030  # Intentionally scoped to this isolated test case.
+  export DEBIAN_USB_LIVE_ENV_PATH="${live_env_fixture}"
+  # shellcheck disable=SC2030  # Intentionally scoped to this isolated test case.
+  export VALIDATOR_LOG="${validator_log}"
+  # shellcheck disable=SC2030  # Intentionally scoped to this isolated test case.
+  export REAL_PYTHON_HELPER="${repo_root}/scripts/debian-usb-python"
+  # shellcheck disable=SC2329  # Invoked indirectly by a sourced writer function.
+  duw_write_managed_uefi_redirect_grub_cfg() {
+    printf 'search --fs-uuid %s\n' "$1" >"$2"
+  }
+  # shellcheck disable=SC2329  # Invoked indirectly by a sourced writer function.
+  duw_iso_member_exists() {
+    return 1
+  }
+  # shellcheck disable=SC2329  # Invoked indirectly by a sourced writer function.
+  xorriso() {
+    printf '%s\n' "$@" >"${raw_xorriso_log}"
+  }
+  duw_rebuild_raw_iso_with_managed_uefi_redirect \
+    "${source_iso}" ESP-UUID "${raw_output_iso}" TESTVOL debian
+)
+expected_validator_args=$(cat <<EOF
+validate-live-wifi-config
+--path
+${live_env_fixture}
+EOF
+)
+actual_validator_args=$(cat -- "${validator_log}")
+[ "${actual_validator_args}" = "${expected_validator_args}" ] || \
+  fail "raw Debian ISO rebuild did not validate the private Live Wi-Fi file"
+for expected_arg in \
+  /live/config-hooks \
+  /live/config-hooks/0500-apt-live-medium.sh \
+  /live/config-hooks/1000-network-wifi.sh \
+  /live/debian-usb-live.env \
+  0600
+do
+  grep -Fxq -- "${expected_arg}" "${raw_xorriso_log}" || \
+    fail "raw Debian ISO rebuild omitted xorriso argument: ${expected_arg}"
+done
+grep -Fxq -- "${live_env_fixture}" "${raw_xorriso_log}" || \
+  fail "raw Debian ISO rebuild did not map the validated Live Wi-Fi source"
+
+chmod 0644 "${live_env_fixture}"
+rm -f -- "${raw_xorriso_log}"
+if invalid_output="$({
+  # shellcheck disable=SC2031  # Intentionally scoped to this isolated test case.
+  export DEBIAN_USB_PYTHON_HELPER="${validator_helper}"
+  # shellcheck disable=SC2031  # Intentionally scoped to this isolated test case.
+  export DEBIAN_USB_LIVE_ENV_PATH="${live_env_fixture}"
+  # shellcheck disable=SC2031  # Intentionally scoped to this isolated test case.
+  export VALIDATOR_LOG="${validator_log}"
+  # shellcheck disable=SC2031  # Intentionally scoped to this isolated test case.
+  export REAL_PYTHON_HELPER="${repo_root}/scripts/debian-usb-python"
+  # shellcheck disable=SC2329  # Invoked indirectly by a sourced writer function.
+  duw_write_managed_uefi_redirect_grub_cfg() {
+    printf 'search --fs-uuid %s\n' "$1" >"$2"
+  }
+  # shellcheck disable=SC2329  # Invoked indirectly by a sourced writer function.
+  duw_iso_member_exists() {
+    return 1
+  }
+  # shellcheck disable=SC2329  # Invoked indirectly by a sourced writer function.
+  xorriso() {
+    printf '%s\n' "$@" >"${raw_xorriso_log}"
+  }
+  duw_rebuild_raw_iso_with_managed_uefi_redirect \
+    "${source_iso}" ESP-UUID "${raw_output_iso}" TESTVOL debian
+} 2>&1)"; then
+  fail "raw Debian ISO rebuild accepted an insecure Live Wi-Fi file: ${invalid_output}"
+fi
+[ ! -e "${raw_xorriso_log}" ] || fail "raw ISO rebuild invoked xorriso after Live Wi-Fi validation failed"
+printf '%s\n' "${invalid_output}" | grep -Fq 'Debian Live environment validation failed' || \
+  fail "unexpected Live Wi-Fi validation failure: ${invalid_output}"
+# shellcheck disable=SC2016  # Dollar sign is a literal secret sentinel.
+printf '%s\n' "${invalid_output}" | grep -Fq 'literal$Pass123' && \
+  fail "Live Wi-Fi validation failure exposed the passphrase"
+chmod 0600 "${live_env_fixture}"
 
 DUSB_LIVE_TOOLS_PREPARED=1
 export DUSB_LIVE_TOOLS_PREPARED
@@ -246,6 +376,7 @@ extract_writer_function() (
 
 shared_builder=$(extract_writer_function duw_build_multios_iso_store_usb)
 raw_builder=$(extract_writer_function duw_build_multios_usb)
+managed_builder=$(extract_writer_function duw_build_managed_usb)
 shared_update_builder=$(extract_writer_function duw_update_multios_shared_data_usb)
 iso_payload_stager=$(extract_writer_function duw_stage_iso_store_payloads_from_render_payload)
 builder_text=${raw_builder}
@@ -258,11 +389,22 @@ cleanup_line=$(printf '%s\n' "${builder_text}" | grep -n -m1 'duw_set_cleanup_tr
 remaster_line=$(printf '%s\n' "${builder_text}" | grep -n -m1 'duw_prepare_multios_live_tools_iso' | cut -d: -f1 || true)
 # Match literal variable references in the shipped writer.
 # shellcheck disable=SC2016
+validation_line=$(printf '%s\n' "${builder_text}" | grep -n -m1 'duw_preflight_debian_live_env_for_raw_payload' | cut -d: -f1 || true)
+# Match literal variable references in the shipped writer.
+# shellcheck disable=SC2016
 device_line=$(printf '%s\n' "${builder_text}" | grep -n -m1 'duw_unmount_device_children' | cut -d: -f1 || true)
-[ -n "${cleanup_line}" ] && [ -n "${remaster_line}" ] && [ -n "${device_line}" ] || \
-  fail "raw Multi-OS builder is missing cleanup, remaster, or device-preparation integration"
+[ -n "${cleanup_line}" ] && [ -n "${remaster_line}" ] && [ -n "${validation_line}" ] && [ -n "${device_line}" ] || \
+  fail "raw Multi-OS builder is missing cleanup, remaster, Live Wi-Fi validation, or device-preparation integration"
 [ "${cleanup_line}" -lt "${remaster_line}" ] || fail "raw Multi-OS builder does not install mount-aware cleanup before Live tool remastering"
-[ "${remaster_line}" -lt "${device_line}" ] || fail "raw Multi-OS builder starts device mutation before Live tool remastering"
+[ "${remaster_line}" -lt "${validation_line}" ] || fail "raw Multi-OS builder validates Live Wi-Fi before preparing its remastered source"
+[ "${validation_line}" -lt "${device_line}" ] || fail "raw Multi-OS builder starts device mutation before Live Wi-Fi validation"
+
+managed_validation_line=$(printf '%s\n' "${managed_builder}" | grep -n -m1 'duw_preflight_debian_live_env_for_raw_payload' | cut -d: -f1 || true)
+managed_device_line=$(printf '%s\n' "${managed_builder}" | grep -n -m1 'duw_unmount_device_children' | cut -d: -f1 || true)
+[ -n "${managed_validation_line}" ] && [ -n "${managed_device_line}" ] || \
+  fail "single-OS managed builder is missing Live Wi-Fi validation or device preparation"
+[ "${managed_validation_line}" -lt "${managed_device_line}" ] || \
+  fail "single-OS managed builder starts device mutation before Live Wi-Fi validation"
 
 for builder_name in create update; do
   case ${builder_name} in
