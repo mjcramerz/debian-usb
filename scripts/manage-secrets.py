@@ -327,7 +327,6 @@ def _rewrite_file(
     *,
     replacements: dict[str, str] | None,
     append_keys: Iterable[str] = (),
-    forced_mode: int | None = None,
     detect_initrd_secrets: bool = False,
     write_only_if_cleared: bool = False,
     dry_run: bool,
@@ -343,8 +342,8 @@ def _rewrite_file(
     if dry_run or (write_only_if_cleared and not cleared_keys):
         return cleared_keys
 
-    desired_mode = forced_mode if forced_mode is not None else stat.S_IMODE(original_stat.st_mode)
-    if rendered == original_text and desired_mode == stat.S_IMODE(original_stat.st_mode):
+    original_mode = stat.S_IMODE(original_stat.st_mode)
+    if rendered == original_text:
         return cleared_keys
 
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.tmp.", dir=path.parent)
@@ -354,7 +353,7 @@ def _rewrite_file(
             stream.write(rendered)
             stream.flush()
             os.fsync(stream.fileno())
-        os.chmod(temporary, desired_mode)
+        os.chmod(temporary, original_mode)
         if (os.geteuid(), os.getegid()) != (original_stat.st_uid, original_stat.st_gid):
             os.chown(temporary, original_stat.st_uid, original_stat.st_gid)
         os.replace(temporary, path)
@@ -584,7 +583,6 @@ def main(argv: list[str] | None = None) -> int:
                     target,
                     replacements=replacements,
                     append_keys=keys,
-                    forced_mode=0o600,
                     detect_initrd_secrets=True,
                     dry_run=args.dry_run,
                 )

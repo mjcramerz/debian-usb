@@ -2506,8 +2506,9 @@ def _repack_initrd_archive(source_dir: Path, archive_path: Path) -> None:
                     stderr=subprocess.PIPE,
                 )
                 assert first.stdout is not None
+                # Normalize cpio headers without changing checkout or workspace ownership.
                 second = subprocess.Popen(
-                    ["cpio", "--null", "-o", "-H", "newc", "--quiet"],
+                    ["cpio", "--null", "-o", "-H", "newc", "--owner=0:0", "--quiet"],
                     cwd=str(source_dir),
                     stdin=first.stdout,
                     stdout=subprocess.PIPE,
@@ -2953,7 +2954,8 @@ def _stage_live_initrd_overlay(live_root: Path, overlay_dir: Path) -> None:
     target.write_text(
         '#!/bin/sh\nset -eu\ncase "${1:-}" in prereqs) exit 0;; esac\n'
         ': "${DESTDIR:?initramfs destination is required}"\n'
-        'cp -a /usr/share/debian-usb/initrd-overlay/. "${DESTDIR}/"\n',
+        '# Keep repository ownership out of the generated initrd.\n'
+        'cp -a --no-preserve=ownership -- /usr/share/debian-usb/initrd-overlay/. "${DESTDIR}/"\n',
         encoding="utf-8",
     )
     target.chmod(0o755)

@@ -78,7 +78,7 @@ class LiveRootPolicyTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            source.chmod(0o600)
+            source.chmod(0o644)
 
             config = live_hooks.load_debian_live_wifi_config(source)
             self.assertEqual(config["LIVE_WIFI_INTERFACE"], "wlan0")
@@ -90,6 +90,7 @@ class LiveRootPolicyTests(unittest.TestCase):
             live_medium = root / "iso-root/live"
             root_config = live_hooks.stage_debian_live_wifi_config(live_root, source)
             medium_config = live_hooks.stage_debian_live_medium_wifi_config(live_medium, source)
+            self.assertEqual(source.stat().st_mode & 0o777, 0o644)
             self.assertEqual(root_config, live_root / "etc/debian-usb/live.env")
             self.assertEqual(medium_config, live_medium / "debian-usb-live.env")
             for staged in (root_config, medium_config):
@@ -99,7 +100,7 @@ class LiveRootPolicyTests(unittest.TestCase):
                 self.assertNotIn("PRESEED_WIFI_PASSPHRASE", rendered)
                 self.assertEqual(staged.stat().st_mode & 0o777, 0o600)
 
-    def test_live_wifi_config_rejects_legacy_unknown_duplicate_and_insecure_secret_inputs(self) -> None:
+    def test_live_wifi_config_rejects_legacy_unknown_and_duplicate_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             cases = {
@@ -111,18 +112,9 @@ class LiveRootPolicyTests(unittest.TestCase):
                 with self.subTest(name=name):
                     source = root / f"{name}.env"
                     source.write_text(content, encoding="utf-8")
-                    source.chmod(0o600)
+                    source.chmod(0o644)
                     with self.assertRaises(ValueError):
                         live_hooks.load_debian_live_wifi_config(source)
-
-            insecure = root / "insecure.env"
-            insecure.write_text(
-                "LIVE_WIFI_ESSID='Net'\nLIVE_WIFI_SECURITY='wpa'\nLIVE_WIFI_PASSPHRASE='SafePass123'\n",
-                encoding="utf-8",
-            )
-            insecure.chmod(0o644)
-            with self.assertRaisesRegex(ValueError, "mode 0600"):
-                live_hooks.load_debian_live_wifi_config(insecure)
 
     def test_live_wifi_config_open_network_omits_an_unneeded_passphrase(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -131,7 +123,7 @@ class LiveRootPolicyTests(unittest.TestCase):
                 "LIVE_WIFI_ESSID='Guest'\nLIVE_WIFI_SECURITY='open'\nLIVE_WIFI_PASSPHRASE='MustNotShip'\n",
                 encoding="utf-8",
             )
-            source.chmod(0o600)
+            source.chmod(0o644)
             config = live_hooks.load_debian_live_wifi_config(source)
             self.assertEqual(config["LIVE_WIFI_PASSPHRASE"], "")
             self.assertNotIn("MustNotShip", live_hooks.render_debian_live_wifi_config(source))

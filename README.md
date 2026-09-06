@@ -202,7 +202,7 @@ Debian Live Wi-Fi configuration comes only from `initrd/debian/live/live.env`:
 | `LIVE_WIFI_NAMESERVERS` | Optional comma- or whitespace-separated IPv4 resolver list. |
 | `LIVE_WIFI_PASSPHRASE` | WPA2 accepts 8-63 UTF-8 bytes or a 64-digit hexadecimal PSK; SAE accepts 1-63 UTF-8 bytes; open networks ignore it. |
 
-No Wi-Fi value is rendered into GRUB or `/proc/cmdline`. The build-side parser uses an exact key allowlist and never sources or evaluates the file. It rejects symlinks, non-regular or oversized files, unsupported or duplicate keys, malformed values, invalid interface/security/address data, and invalid WPA/SAE lengths. A source containing a passphrase must have mode `0600`. The direct raw-ISO writer runs the same validator before invoking `xorriso`; malformed or insecure input therefore fails before the ISO rebuild and before any USB-device mutation.
+No Wi-Fi value is rendered into GRUB or `/proc/cmdline`. The build-side parser uses an exact key allowlist and never sources or evaluates the file. It rejects symlinks, non-regular or oversized files, unsupported or duplicate keys, malformed values, invalid interface/security/address data, and invalid WPA/SAE lengths. It neither requires nor changes any Unix mode on the repository source. The direct raw-ISO writer runs the same content validator before invoking `xorriso`; malformed input therefore fails before the ISO rebuild and before any USB-device mutation.
 
 Custom Debian Live builds and Debian Live persistence, Live Host, and administration-tool remasters atomically stage the canonical file with mode `0600` at both locations required by the runtime:
 
@@ -215,7 +215,7 @@ The Debian Live Create and Multi-OS paths also apply `initrd/debian/live` automa
 
 When configured, the hook unblocks Wi-Fi, waits for the requested interface (or detects one), verifies that the ESSID is visible, generates a private `wpa_supplicant` configuration, performs bounded association, applies the static IPv4 settings or runs DHCP, installs the requested gateway, and applies the configured nameservers. Ethernet and any other established link remain up; Wi-Fi receives default-route metric `600`, and per-link DNS is prevented from displacing a resolver owned by another default-route interface.
 
-Mode `0600` prevents ordinary users in the running system or build tree from reading the file, but it does not encrypt the media. Any ISO or initrd containing `LIVE_WIFI_PASSPHRASE` must be treated as sensitive because a person with the image can extract it.
+Mode `0600` on staged and generated copies prevents ordinary users in the running system or staged build tree from reading the file; repository source modes are intentionally unconstrained. This does not encrypt the media. Any ISO or initrd containing `LIVE_WIFI_PASSPHRASE` must be treated as sensitive because a person with the image can extract it.
 
 ### Live recovery and administration tools
 

@@ -72,7 +72,7 @@ Interactive terminals use Up/Down, Home/End, Page Up/Down, Enter/Space, numeric 
 
 Saved plans now retain source role and preparation details. Save uses `s`, avoiding the former collision with live-overrides option `8`; saved-plan rows also participate in arrow navigation.
 
-The uploaded Live Wi-Fi template had enabled WPA settings with no passphrase. It now starts unconfigured (empty ESSID and address fields) and mode 0600. Configure the local `initrd/debian/live/live.env` before building when Wi-Fi is needed. Embedded credentials remain extractable by anyone possessing the image; file mode is not media encryption.
+The uploaded Live Wi-Fi template had enabled WPA settings with no passphrase. It now starts unconfigured (empty ESSID and address fields). Repository files under `initrd/` have no required Unix mode; generated Live root and medium copies are staged with mode 0600. Configure the local `initrd/debian/live/live.env` before building when Wi-Fi is needed. Embedded credentials remain extractable by anyone possessing the image; generated-file mode is not media encryption.
 
 ## Upstream references
 

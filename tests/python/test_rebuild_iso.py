@@ -1113,6 +1113,68 @@ class RebuildISOTests(unittest.TestCase):
             self.assertEqual(created_directories, (output_dir,))
 
     @unittest.skipUnless(
+        all(shutil.which(command) for command in ("cpio", "find")),
+        "requires cpio and find",
+    )
+    def test_repacked_initrd_uses_root_ownership_without_changing_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_tree = root / "source-tree"
+            source_tree.mkdir()
+            source_file = source_tree / "repo-overlay-marker"
+            source_file.write_text("overlay\n", encoding="utf-8")
+            if (source_file.stat().st_uid, source_file.stat().st_gid) == (0, 0):
+                os.chown(source_file, 12345, 23456)
+            source_owner = (source_file.stat().st_uid, source_file.stat().st_gid)
+            self.assertNotEqual(source_owner, (0, 0))
+
+            archive = root / "initrd.cpio"
+            rebuild_iso._repack_initrd_archive(source_tree, archive)
+
+            self.assertEqual((source_file.stat().st_uid, source_file.stat().st_gid), source_owner)
+            with archive.open("rb") as archive_handle:
+                listing = subprocess.run(
+                    ["cpio", "-itv", "--numeric-uid-gid"],
+                    stdin=archive_handle,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=False,
+                )
+            self.assertEqual(listing.returncode, 0, listing.stderr)
+            member_fields = next(
+                fields
+                for line in listing.stdout.splitlines()
+                if (fields := line.split()) and fields[-1] == "repo-overlay-marker"
+            )
+            self.assertEqual(member_fields[2:4], ["0", "0"])
+
+    @unittest.skipUnless(
+        all(shutil.which(command) for command in ("cpio", "find")),
+        "requires cpio and find",
+    )
+    def test_live_initramfs_hook_drops_repository_ownership(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            overlay = root / "initrd/debian/live"
+            overlay.mkdir(parents=True)
+            source_file = overlay / "live-marker"
+            source_file.write_text("selected-live-only\n", encoding="utf-8")
+            source_owner = (source_file.stat().st_uid, source_file.stat().st_gid)
+            live_root = root / "live-root"
+            live_root.mkdir()
+
+            rebuild_iso._stage_live_initrd_overlay(live_root, overlay)
+
+            self.assertEqual((source_file.stat().st_uid, source_file.stat().st_gid), source_owner)
+            hook = live_root / "etc/initramfs-tools/hooks/zz-debian-usb-overlay"
+            self.assertIn(
+                'cp -a --no-preserve=ownership -- '
+                '/usr/share/debian-usb/initrd-overlay/. "${DESTDIR}/"',
+                hook.read_text(encoding="utf-8"),
+            )
+
+    @unittest.skipUnless(
         all(shutil.which(command) for command in ("cpio", "find", "gzip")),
         "requires cpio, find, and gzip",
     )

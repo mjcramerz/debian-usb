@@ -259,8 +259,6 @@ def load_debian_live_wifi_config(path: str | Path = "") -> dict[str, str]:
         raise ValueError("LIVE_WIFI_PASSPHRASE must be 1 to 63 UTF-8 bytes for SAE")
     normalized["LIVE_WIFI_PASSPHRASE"] = passphrase
 
-    if passphrase and stat.S_IMODE(source.stat().st_mode) & 0o077:
-        raise ValueError(f"Debian Live environment with a passphrase must have mode 0600: {source}")
     return normalized
 
 

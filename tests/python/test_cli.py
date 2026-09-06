@@ -232,7 +232,7 @@ class CLITests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            live_env.chmod(0o600)
+            live_env.chmod(0o644)
             stdout = io.StringIO()
             stderr = io.StringIO()
             with patch("sys.stdout", stdout), patch("sys.stderr", stderr):
@@ -243,29 +243,16 @@ class CLITests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(json.loads(stdout.getvalue()), {"valid": True})
             self.assertEqual(stderr.getvalue(), "")
+            self.assertEqual(live_env.stat().st_mode & 0o777, 0o644)
             self.assertNotIn("Fixture Network", stdout.getvalue())
             self.assertNotIn("literal$Pass123", stdout.getvalue())
-
-            live_env.chmod(0o644)
-            stdout = io.StringIO()
-            stderr = io.StringIO()
-            with patch("sys.stdout", stdout), patch("sys.stderr", stderr):
-                exit_code = cli.main(
-                    ["validate-live-wifi-config", "--path", str(live_env)]
-                )
-
-            self.assertEqual(exit_code, 1)
-            self.assertEqual(stdout.getvalue(), "")
-            self.assertIn("mode 0600", stderr.getvalue())
-            self.assertNotIn("Fixture Network", stderr.getvalue())
-            self.assertNotIn("literal$Pass123", stderr.getvalue())
 
             live_env.write_text(
                 "LIVE_WIFI_ESSID=\"Publisher's Network\"\n"
                 "LIVE_WIFI_SECURITY='open'\n",
                 encoding="utf-8",
             )
-            live_env.chmod(0o600)
+            live_env.chmod(0o644)
             stdout = io.StringIO()
             stderr = io.StringIO()
             with patch("sys.stdout", stdout), patch("sys.stderr", stderr):

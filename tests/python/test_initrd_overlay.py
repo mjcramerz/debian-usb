@@ -26,7 +26,7 @@ class InitrdOverlayTests(unittest.TestCase):
             (overlay / "etc/debian-usb").mkdir(parents=True)
             preseed = overlay / "preseed.env"
             preseed.write_text('PRESEED_PRIMARY_USERNAME=""\n', encoding="utf-8")
-            preseed.chmod(0o600)
+            preseed.chmod(0o644)
             (overlay / "etc/debian-usb/stage").write_text("netinst\n", encoding="utf-8")
             initrd_root.mkdir()
 
@@ -37,7 +37,7 @@ class InitrdOverlayTests(unittest.TestCase):
                 'PRESEED_PRIMARY_USERNAME=""\n',
             )
             self.assertEqual((initrd_root / "etc/debian-usb/stage").read_text(encoding="utf-8"), "netinst\n")
-            self.assertEqual(stat.S_IMODE((initrd_root / "preseed.env").stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE((initrd_root / "preseed.env").stat().st_mode), 0o644)
             self.assertEqual(manifest["embedded_root"], "/")
 
     @REQUIRES_OVERLAY_TOOLS

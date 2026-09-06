@@ -381,7 +381,7 @@ class BuildISOTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            live_env.chmod(0o600)
+            live_env.chmod(0o644)
             with patch.dict(build_iso.os.environ, {"DEBIAN_USB_LIVE_ENV_PATH": str(live_env)}):
                 build_iso._materialize_workspace(build_root, plan, None, [])
             chroot_packages = (build_root / "config" / "package-lists" / "base.list.chroot").read_text(
