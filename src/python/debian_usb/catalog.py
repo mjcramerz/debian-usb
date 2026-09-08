@@ -92,13 +92,13 @@ PROFILES: dict[str, Profile] = {
     ),
     PROFILE_TAILS: Profile(
         title="Tails",
-        supports_managed=True,
-        supports_persistence=True,
+        supports_managed=True,  # Experimental stock ISO boot, not a native Tails USB.
+        supports_persistence=False,
         managed_payload_layout=MANAGED_PAYLOAD_LAYOUT_RAW_ISO,
         preferred_media="live",
-        supports_live_overrides=True,
+        supports_live_overrides=False,
         live_boot_family="live-boot",
-        default_menu_label="Tails Live",
+        default_menu_label="Tails Live (experimental, no persistence)",
         persistence_fs_label="TailsData",
         persistence_partlabel="TailsData",
     ),

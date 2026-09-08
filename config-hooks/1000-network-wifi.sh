@@ -470,7 +470,7 @@ lw_configure_address() (
       return 0
     }
     ip -4 route del default dev "${interface}" >/dev/null 2>&1 || true
-    ip -4 route add default via "${gateway}" dev "${interface}" onlink metric 600 || true
+    ip -4 route add default via "${gateway}" dev "${interface}" onlink metric 50 || true
   fi
   lw_reprioritize_wifi_default_route "${interface}"
 )
@@ -501,9 +501,9 @@ lw_reprioritize_wifi_default_route() (
   fi
   ip -4 route del default dev "${interface}" >/dev/null 2>&1 || true
   if [ -n "${gateway}" ]; then
-    ip -4 route add default via "${gateway}" dev "${interface}" metric 600 >/dev/null 2>&1 || true
+    ip -4 route add default via "${gateway}" dev "${interface}" metric 50 >/dev/null 2>&1 || true
   else
-    ip -4 route add default dev "${interface}" metric 600 >/dev/null 2>&1 || true
+    ip -4 route add default dev "${interface}" metric 50 >/dev/null 2>&1 || true
   fi
 )
 
@@ -534,18 +534,11 @@ lw_configure_nameservers() (
   set +f
   IFS=${old_ifs}
   if lw_have resolvectl && resolvectl dns "${interface}" "$@" >/dev/null 2>&1; then
-    if lw_has_other_default_route "${interface}"; then
-      resolvectl default-route "${interface}" no >/dev/null 2>&1 || true
-    else
-      resolvectl default-route "${interface}" yes >/dev/null 2>&1 || true
-    fi
+    resolvectl default-route "${interface}" yes >/dev/null 2>&1 || true
+    resolvectl domain "${interface}" '~.' >/dev/null 2>&1 || true
     return 0
   fi
 
-  if lw_has_other_default_route "${interface}"; then
-    lw_log "keeping the existing resolver because another connected interface owns a default route"
-    return 0
-  fi
   if [ -e /etc/resolv.conf ] && [ ! -L /etc/resolv.conf ]; then
     cp -a -- /etc/resolv.conf /etc/resolv.conf.debian-usb-live-wifi.bak 2>/dev/null || true
   fi
@@ -557,6 +550,9 @@ lw_configure_nameservers() (
 )
 
 lw_main() (
+  if [ -x /usr/local/lib/debian-usb/live-wifi.py ]; then
+    exec /usr/local/lib/debian-usb/live-wifi.py --boot
+  fi
   live_env_path=$(lw_live_env_path 2>/dev/null || true)
   if [ -z "${live_env_path}" ]; then
     lw_log "no private Debian Live Wi-Fi environment file found; skipping"

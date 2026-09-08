@@ -376,21 +376,18 @@ menuentry 'Live contaminant' {
             self.assertNotIn("Live contaminant", grub_cfg)
             self.assertNotIn("Install from hybrid ISO", grub_cfg)
 
-            self.assertEqual(
-                rendered["payload_boot_assets"],
-                [
-                    {
-                        "iso_path": str(debian_netinst_root),
-                        "source_path": "/hd-media/vmlinuz",
-                        "target_path": "/debian-netinst/vmlinuz",
-                    },
-                    {
-                        "iso_path": str(debian_netinst_root),
-                        "source_path": "/hd-media/initrd.gz",
-                        "target_path": "/debian-netinst/initrd.gz",
-                    },
-                ],
-            )
+            expected = [
+                {"iso_path": str(debian_netinst_root),
+                 "source_path": f"/.debian-usb/installer-profiles/{flavor}/{filename}",
+                 "target_path": f"/debian-netinst-{suffix}/{filename}"}
+                for flavor, suffix in (("desktop", "de"), ("server", "srv"))
+                for filename in ("vmlinuz", "initrd.gz")
+            ] + [
+                {"iso_path": str(debian_netinst_root), "source_path": f"/hd-media/{filename}",
+                 "target_path": f"/debian-netinst/{filename}"}
+                for filename in ("vmlinuz", "initrd.gz")
+            ]
+            self.assertEqual(rendered["payload_boot_assets"], expected)
             manifests = (
                 rendered["iso_payloads"]
                 + rendered["payload_boot_assets"]
@@ -608,26 +605,22 @@ menuentry 'Install from ISO internals' {
             self.assertNotIn("loopback", netinst_block)
             self.assertNotIn("/live/", netinst_block)
 
-            self.assertEqual(
-                rendered["signed_kernel_assets"],
-                [
-                    {
-                        "iso_path": str(debian_netinst_root),
-                        "source_path": "/hd-media/vmlinuz",
-                        "asset_path": "/EFI/debian-usb/assets/netinst/hd-media/vmlinuz",
-                    }
-                ],
-            )
-            self.assertEqual(
-                rendered["boot_initrd_assets"],
-                [
-                    {
-                        "iso_path": str(debian_netinst_root),
-                        "source_path": "/hd-media/initrd.gz",
-                        "asset_path": "/EFI/debian-usb/assets/netinst/hd-media/initrd.gz",
-                    }
-                ],
-            )
+            self.assertEqual(rendered["signed_kernel_assets"], [
+                {"iso_path": str(debian_netinst_root), "source_path": member,
+                 "asset_path": "/EFI/debian-usb/assets/netinst" + member}
+                for member in (
+                    "/.debian-usb/installer-profiles/desktop/vmlinuz",
+                    "/.debian-usb/installer-profiles/server/vmlinuz",
+                    "/hd-media/vmlinuz")
+            ])
+            self.assertEqual(rendered["boot_initrd_assets"], [
+                {"iso_path": str(debian_netinst_root), "source_path": member,
+                 "asset_path": "/EFI/debian-usb/assets/netinst" + member}
+                for member in (
+                    "/.debian-usb/installer-profiles/desktop/initrd.gz",
+                    "/.debian-usb/installer-profiles/server/initrd.gz",
+                    "/hd-media/initrd.gz")
+            ])
             self.assertFalse(
                 any(
                     "/live/" in asset["source_path"]
@@ -892,10 +885,10 @@ menuentry 'Live system (amd64)' {
                 )
             grub_cfg = rendered["grub_cfg"]
             self.assertIn('submenu "Debian Netinst ..."', grub_cfg)
-            self.assertIn('submenu "Debian Netinst Install (HTTP Preseed) ..."', grub_cfg)
-            self.assertIn('submenu "Debian Netinst Install (USB Preseed) ..."', grub_cfg)
-            self.assertIn('submenu "Preseed Internal ..."', grub_cfg)
-            self.assertIn('submenu "Preseed Public ..."', grub_cfg)
+            self.assertIn('submenu "Debian Netinst Install (HTTP LAN) ..."', grub_cfg)
+            self.assertIn('submenu "Debian Netinst Install (USB HD-MEDIA) ..."', grub_cfg)
+            self.assertIn('submenu "DEBIAN DESKTOP"', grub_cfg)
+            self.assertIn('submenu "DEBIAN SERVER"', grub_cfg)
 
     def test_render_multios_grub_applies_configured_network_interface_to_all_netinst_installer_entries(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1020,7 +1013,7 @@ menuentry 'Live system (amd64)' {
                     }
                 ],
             }
-            with self.assertRaisesRegex(ValueError, "Tails persistence must be encrypted"):
+            with self.assertRaisesRegex(ValueError, "Tails native Persistent Storage"):
                 validate_multios_plan(plan)
 
     def test_validate_multios_plan_rejects_preseed_on_fixed_primary_live_source(self) -> None:
@@ -1182,10 +1175,10 @@ menuentry '... Rescue mode' {
             self.assertIn('menuentry "... Debian Live Environment (RAM + Persistence)"', grub_cfg)
             self.assertNotIn('submenu "Debian Live Install (HTTP Preseed) ..."', grub_cfg)
             self.assertNotIn('submenu "Debian Live Install (USB Preseed) ..."', grub_cfg)
-            self.assertIn('submenu "Preseed Internal ..."', grub_cfg)
-            self.assertIn('submenu "Preseed Public ..."', grub_cfg)
+            self.assertIn('submenu "DEBIAN DESKTOP"', grub_cfg)
+            self.assertIn('submenu "DEBIAN SERVER"', grub_cfg)
             self.assertIn('submenu "Tails ..."', grub_cfg)
-            self.assertIn('submenu "Tails Live ..."', grub_cfg)
+            self.assertIn('submenu "Tails Live (experimental) ..."', grub_cfg)
             self.assertNotIn('submenu "Ubuntu ..."', grub_cfg)
             self.assertLess(grub_cfg.index('submenu "Debian Live ..."'), grub_cfg.index('submenu "Debian Netinst ..."'))
             self.assertLess(grub_cfg.index('submenu "Tails ..."'), grub_cfg.index('submenu "Boot from Internal Drive"'))
@@ -1205,17 +1198,17 @@ menuentry '... Rescue mode' {
             tails_ram = next(
                 entry
                 for entry in entries
-                if entry.title == "... Tails Live Environment (RAM)"
-                and entry.menu_path == ("Tails ...", "Tails Live ...")
+                if entry.title == "... Tails Live Environment (RAM) [experimental, no persistence]"
+                and entry.menu_path == ("Tails ...", "Tails Live (experimental) ...")
             )
             self.assertIn("toram=filesystem.squashfs", tails_ram.kernel_args.split())
             self.assertNotIn("toram", tails_ram.kernel_args.split())
 
             default_title = "... Debian Netinst Install" + _repo_preset_label(
-                "debian", "debian", "PRESEED_ONE_ARGS_DEBIAN"
+                "debian", "debian-de", "PRESEED_ONE_ARGS_DEBIAN_DE"
             )
             dualboot_title = "... Debian Netinst Install" + _repo_preset_label(
-                "debian", "debian", "PRESEED_THREE_ARGS_DEBIAN"
+                "debian", "debian-de", "PRESEED_THREE_ARGS_DEBIAN_DE"
             )
             online_preset = next(
                 entry
@@ -1225,12 +1218,11 @@ menuentry '... Rescue mode' {
                 == (
                     "Debian ...",
                     "Debian Netinst ...",
-                    "Debian Netinst Install (HTTP Preseed) ...",
-                    "Preseed Internal ...",
+                    "DEBIAN DESKTOP", "Debian Netinst Install (HTTP LAN) ...",
                 )
             )
-            self.assertEqual(online_preset.kernel_path, "/boot/debian/netinst/vmlinuz")
-            self.assertEqual(online_preset.initrd_path, "/boot/debian/netinst/initrd.gz")
+            self.assertEqual(online_preset.kernel_path, "/debian-netinst-de/vmlinuz")
+            self.assertEqual(online_preset.initrd_path, "/debian-netinst-de/initrd.gz")
             configured_priority = _template_kernel_arg("PRESEED_COMMON_KERNEL_ARGS", "priority")
             priority_tokens = [
                 token for token in online_preset.kernel_args.split() if token.startswith("priority=")
@@ -1253,15 +1245,14 @@ menuentry '... Rescue mode' {
                 == (
                     "Debian ...",
                     "Debian Netinst ...",
-                    "Debian Netinst Install (USB Preseed) ...",
-                    "Preseed Public ...",
+                    "DEBIAN DESKTOP", "Debian Netinst Install (INITRD PRESEED) ...",
                 )
             )
-            self.assertEqual(offline_preset.kernel_path, "/boot/debian/netinst/vmlinuz")
-            self.assertEqual(offline_preset.initrd_path, "/boot/debian/netinst/initrd.gz")
+            self.assertEqual(offline_preset.kernel_path, "/debian-netinst-de/vmlinuz")
+            self.assertEqual(offline_preset.initrd_path, "/debian-netinst-de/initrd.gz")
             self.assertEqual(
                 _seed_transport_tokens(offline_preset.kernel_args),
-                [f"url={load_template_config()['DEBIAN_PRESEED_PUBLIC_URL']}"],
+                [],
             )
 
             dualboot_preset = next(
@@ -1272,12 +1263,11 @@ menuentry '... Rescue mode' {
                 == (
                     "Debian ...",
                     "Debian Netinst ...",
-                    "Debian Netinst Install (USB Preseed) ...",
-                    "Preseed Internal ...",
+                    "DEBIAN DESKTOP", "Debian Netinst Install (USB HD-MEDIA) ...",
                 )
             )
             self.assertIn(
-                _grub_escaped_config_arg("PRESEED_THREE_ARGS_DEBIAN", "classes"),
+                _grub_escaped_config_arg("PRESEED_THREE_ARGS_DEBIAN_DE", "classes"),
                 dualboot_preset.kernel_args.split(),
             )
 
@@ -1441,13 +1431,13 @@ menuentry '... Rescue mode' {
             )
 
             grub_cfg = rendered["grub_cfg"]
-            self.assertIn('submenu "Kali Netinst Install (HTTP Preseed) ..."', grub_cfg)
-            self.assertIn('submenu "Kali Netinst Install (USB Preseed) ..."', grub_cfg)
-            self.assertIn('submenu "Preseed Internal ..."', grub_cfg)
-            self.assertIn('submenu "Preseed Public ..."', grub_cfg)
+            self.assertIn('submenu "Kali Netinst Install (HTTP LAN) ..."', grub_cfg)
+            self.assertIn('submenu "Kali Netinst Install (USB HD-MEDIA) ..."', grub_cfg)
+            self.assertIn('submenu "KALI DESKTOP"', grub_cfg)
+            self.assertIn('submenu "KALI SERVER"', grub_cfg)
 
             default_title = "... Kali Netinst Install" + _repo_preset_label(
-                "kali-linux", "kali", "PRESEED_ONE_ARGS_KALI"
+                "kali-linux", "kali", "PRESEED_ONE_ARGS_KALI_DE"
             )
             entries = parse_grub_entries(grub_cfg, "boot/grub/grub.cfg")
             online_preseed = next(
@@ -1455,10 +1445,10 @@ menuentry '... Rescue mode' {
                 for entry in entries
                 if entry.title == default_title
                 and entry.menu_path
-                == ("Kali ...", "Kali Netinst ...", "Kali Netinst Install (HTTP Preseed) ...", "Preseed Internal ...")
+                == ("Kali ...", "Kali Netinst ...", "KALI DESKTOP", "Kali Netinst Install (HTTP LAN) ...")
             )
-            self.assertEqual(online_preseed.kernel_path, "/boot/kali/kali-linux/netinst/vmlinuz")
-            self.assertEqual(online_preseed.initrd_path, "/boot/kali/kali-linux/netinst/initrd.gz")
+            self.assertEqual(online_preseed.kernel_path, "/kali-netinst-de/vmlinuz")
+            self.assertEqual(online_preseed.initrd_path, "/kali-netinst-de/initrd.gz")
             self.assertIn("iso-scan/filename=/boot/iso/kali/netinst/kali-netinst-root.iso", online_preseed.kernel_args)
             self.assertIn(
                 _template_kernel_arg("PRESEED_COMMON_KERNEL_ARGS", "interface"),
@@ -1473,14 +1463,14 @@ menuentry '... Rescue mode' {
                 for entry in entries
                 if entry.title == default_title
                 and entry.menu_path
-                == ("Kali ...", "Kali Netinst ...", "Kali Netinst Install (USB Preseed) ...", "Preseed Public ...")
+                == ("Kali ...", "Kali Netinst ...", "KALI DESKTOP", "Kali Netinst Install (INITRD PRESEED) ...")
             )
-            self.assertEqual(offline_preseed.kernel_path, "/boot/kali/kali-linux/netinst/vmlinuz")
-            self.assertEqual(offline_preseed.initrd_path, "/boot/kali/kali-linux/netinst/initrd.gz")
+            self.assertEqual(offline_preseed.kernel_path, "/kali-netinst-de/vmlinuz")
+            self.assertEqual(offline_preseed.initrd_path, "/kali-netinst-de/initrd.gz")
             self.assertIn("iso-scan/filename=/boot/iso/kali/netinst/kali-netinst-root.iso", offline_preseed.kernel_args)
             self.assertEqual(
                 _seed_transport_tokens(offline_preseed.kernel_args),
-                [f"url={load_template_config()['DEBIAN_PRESEED_PUBLIC_URL']}"],
+                [],
             )
 
     def test_render_multios_grub_binds_netinst_preseed_entries_for_iso_store_layout(self) -> None:
@@ -1524,19 +1514,19 @@ menuentry '... Rescue mode' {
                 entry
                 for entry in entries
                 if entry.menu_path
-                == ("Debian ...", "Debian Netinst ...", "Debian Netinst Install (HTTP Preseed) ...", "Preseed Internal ...")
+                == ("Debian ...", "Debian Netinst ...", "DEBIAN DESKTOP", "Debian Netinst Install (HTTP LAN) ...")
             )
             offline_preset = next(
                 entry
                 for entry in entries
                 if entry.menu_path
-                == ("Debian ...", "Debian Netinst ...", "Debian Netinst Install (USB Preseed) ...", "Preseed Internal ...")
+                == ("Debian ...", "Debian Netinst ...", "DEBIAN DESKTOP", "Debian Netinst Install (USB HD-MEDIA) ...")
             )
             public_preset = next(
                 entry
                 for entry in entries
                 if entry.menu_path
-                == ("Debian ...", "Debian Netinst ...", "Debian Netinst Install (USB Preseed) ...", "Preseed Public ...")
+                == ("Debian ...", "Debian Netinst ...", "DEBIAN DESKTOP", "Debian Netinst Install (INITRD PRESEED) ...")
             )
             self.assertIn("iso-scan/filename=/boot/iso/debian/netinst/debian-netinst-root.iso", online_preset.kernel_args)
             self.assertIn("iso-scan/filename=/boot/iso/debian/netinst/debian-netinst-root.iso", offline_preset.kernel_args)
@@ -1545,13 +1535,12 @@ menuentry '... Rescue mode' {
             self.assertTrue(online_seed_tokens[0].startswith("url="))
             self.assertEqual(
                 _seed_transport_tokens(offline_preset.kernel_args),
-                ["file=/hd-media/preseed/debian/preseed.cfg"],
+                ["file=/hd-media/debian-preseed-de/preseed.cfg"],
             )
-            public_seed_tokens = _seed_transport_tokens(public_preset.kernel_args)
-            self.assertEqual(len(public_seed_tokens), 1)
-            self.assertTrue(public_seed_tokens[0].startswith("url=https://"))
-            for token in load_template_config()["DEBIAN_PRESEED_PUBLIC_ARGS"].split():
-                self.assertIn(token, public_preset.kernel_args.split())
+            self.assertEqual(_seed_transport_tokens(public_preset.kernel_args), [])
+            self.assertIn("DUSB_PRESEED_MODE=initrd", public_preset.kernel_args)
+            for token in load_template_config()["DEBIAN_DE_PRESEED_PUBLIC_ARGS"].split():
+                self.assertNotIn(token, public_preset.kernel_args.split())
                 self.assertNotIn(token, offline_preset.kernel_args.split())
 
     def test_render_multios_grub_uses_payload_iso_name_for_netinst_iso_scan_paths(self) -> None:
@@ -1723,7 +1712,7 @@ menuentry '... Rescue mode' {
                 for entry in entries
                 if entry.title == "... Kali Netinst Install (ROLE=Desktop,GPU=Nvidia,NET=DHCP)"
                 and entry.menu_path
-                == ("Kali ...", "Kali Netinst ...", "Kali Netinst Install (HTTP Preseed) ...", "Preseed Internal ...")
+                == ("Kali ...", "Kali Netinst ...", "KALI DESKTOP", "Kali Netinst Install (HTTP LAN) ...")
             )
             kali_purple_online = next(
                 entry
@@ -1737,7 +1726,7 @@ menuentry '... Rescue mode' {
                     "Preseed Internal ...",
                 )
             )
-            self.assertEqual(kali_netinst_online.kernel_path, "/boot/kali/kali-linux/netinst/vmlinuz")
+            self.assertEqual(kali_netinst_online.kernel_path, "/kali-netinst-de/vmlinuz")
             self.assertEqual(kali_purple_online.kernel_path, "/boot/kali/kali-purple/installer/vmlinuz")
             self.assertIn("iso-scan/filename=/boot/iso/kali/netinst/kali-netinst-root.iso", kali_netinst_online.kernel_args)
             self.assertIn("iso-scan/filename=/boot/iso/kali/installer/kali-purple-root.iso", kali_purple_online.kernel_args)
@@ -1788,15 +1777,15 @@ menuentry '... Rescue mode' {
             self.assertIn('submenu "Kali Netboot ..."', grub_cfg)
             self.assertIn('menuentry "... Debian Netboot Install"', grub_cfg)
             self.assertIn('menuentry "... Kali Netboot Install"', grub_cfg)
-            self.assertIn('submenu "Debian Netboot Install (HTTP Preseed) ..."', grub_cfg)
-            self.assertIn('submenu "Kali Netboot Install (HTTP Preseed) ..."', grub_cfg)
+            self.assertIn('submenu "Debian Netboot Install (HTTP LAN) ..."', grub_cfg)
+            self.assertIn('submenu "Kali Netboot Install (HTTP LAN) ..."', grub_cfg)
 
             entries = parse_grub_entries(grub_cfg, "boot/grub/grub.cfg")
             debian_default_title = "... Debian Netboot Install" + _repo_preset_label(
-                "debian", "debian", "PRESEED_ONE_ARGS_DEBIAN"
+                "debian", "debian-de", "PRESEED_ONE_ARGS_DEBIAN_DE"
             )
             kali_default_title = "... Kali Netboot Install" + _repo_preset_label(
-                "kali-linux", "kali", "PRESEED_ONE_ARGS_KALI"
+                "kali-linux", "kali", "PRESEED_ONE_ARGS_KALI_DE"
             )
             debian_manual = next(
                 entry
@@ -1809,7 +1798,7 @@ menuentry '... Rescue mode' {
                 for entry in entries
                 if entry.title == debian_default_title
                 and entry.menu_path
-                == ("Debian ...", "Debian Netboot ...", "Debian Netboot Install (HTTP Preseed) ...", "Preseed Internal ...")
+                == ("Debian ...", "Debian Netboot ...", "DEBIAN DESKTOP", "Debian Netboot Install (HTTP LAN) ...")
             )
             kali_manual = next(
                 entry
@@ -1822,13 +1811,13 @@ menuentry '... Rescue mode' {
                 for entry in entries
                 if entry.title == kali_default_title
                 and entry.menu_path
-                == ("Kali ...", "Kali Netboot ...", "Kali Netboot Install (HTTP Preseed) ...", "Preseed Internal ...")
+                == ("Kali ...", "Kali Netboot ...", "KALI DESKTOP", "Kali Netboot Install (HTTP LAN) ...")
             )
             for entry, kernel_path, initrd_path in (
                 (debian_manual, "/debian-netboot/vmlinuz", "/debian-netboot/initrd.gz"),
-                (debian_netboot, "/debian-netboot/vmlinuz", "/debian-netboot/initrd.gz"),
+                (debian_netboot, "/debian-netboot-de/vmlinuz", "/debian-netboot-de/initrd.gz"),
                 (kali_manual, "/kali-netboot/vmlinuz", "/kali-netboot/initrd.gz"),
-                (kali_netboot, "/kali-netboot/vmlinuz", "/kali-netboot/initrd.gz"),
+                (kali_netboot, "/kali-netboot-de/vmlinuz", "/kali-netboot-de/initrd.gz"),
             ):
                 self.assertEqual(entry.kernel_path, kernel_path)
                 self.assertEqual(entry.initrd_path, initrd_path)

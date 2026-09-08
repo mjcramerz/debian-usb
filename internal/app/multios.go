@@ -73,6 +73,7 @@ func (a *App) collectMultiOSRequest() (MultiOSRequest, menuAction, error) {
 			ProfileOfflinePreseedDirs:   make(map[string]string, len(selections)),
 			Items:                       make([]MultiOSRequestItem, 0, len(selections)),
 		}
+		hdMediaChoices := make(map[string]map[string]string)
 		for index, selection := range selections {
 			spec := profileSpecs[selection.Profile]
 			item, action, err := a.collectMultiOSItem(spec, index+1, len(selections), selection.SourceRole)
@@ -81,6 +82,17 @@ func (a *App) collectMultiOSRequest() (MultiOSRequest, menuAction, error) {
 			}
 			if createPreseedEligible(selection.Profile, selection.SourceRole, true, item.Inspection) {
 				item.Preseed = true
+			}
+			if splitInstallerProfile(selection.Profile, selection.SourceRole) {
+				choices, asked := hdMediaChoices[selection.Profile]
+				if !asked {
+					choices, err = a.promptHDMediaPreseedDirs(selection.Profile)
+					if err != nil {
+						return request, menuStay, err
+					}
+					hdMediaChoices[selection.Profile] = choices
+				}
+				item.HDMediaPreseedDirs = cloneHDMediaPreseedDirs(choices)
 			}
 			request.Items = append(request.Items, item)
 		}
@@ -360,6 +372,20 @@ func buildMultiOSPlan(config RuntimeConfig, request MultiOSRequest) (MultiOSPlan
 		if err != nil {
 			return MultiOSPlan{}, err
 		}
+		hdMediaDirs, err := normalizeHDMediaPreseedDirs(item.Profile, sourceRole, item.HDMediaPreseedDirs)
+		if err != nil {
+			return MultiOSPlan{}, err
+		}
+		for _, previous := range plan.Items {
+			if previous.Profile != item.Profile {
+				continue
+			}
+			for flavor, source := range hdMediaDirs {
+				if other := previous.HDMediaPreseedDirs[flavor]; other != "" && other != source {
+					return MultiOSPlan{}, fmt.Errorf("%s %s netinst/netboot must use the same HD-MEDIA codebase", item.Profile, flavor)
+				}
+			}
+		}
 		preseed := createPreseedEligible(item.Profile, sourceRole, request.UseCustomGrubMenu, inspection)
 		offlinePreseedSourceDir := ""
 		if preseed {
@@ -385,11 +411,7 @@ func buildMultiOSPlan(config RuntimeConfig, request MultiOSRequest) (MultiOSPlan
 			persistenceMode = persistenceModeNone
 		}
 		if item.Persistence && persistenceMode == persistenceModeNone {
-			if item.Profile == profileTails {
-				persistenceMode = persistenceModeEncrypted
-			} else {
-				persistenceMode = persistenceModePlain
-			}
+			persistenceMode = persistenceModePlain
 		}
 		if !item.Persistence {
 			persistenceMode = persistenceModeNone
@@ -399,8 +421,13 @@ func buildMultiOSPlan(config RuntimeConfig, request MultiOSRequest) (MultiOSPlan
 		default:
 			return MultiOSPlan{}, fmt.Errorf("persistence mode must be plain or encrypted for %s", spec.MultiOSLabel)
 		}
-		if item.Profile == profileTails && persistenceMode == persistenceModePlain {
-			return MultiOSPlan{}, fmt.Errorf("Tails persistence must be encrypted")
+		if item.Profile == profileTails {
+			if item.Persistence {
+				return MultiOSPlan{}, fmt.Errorf("Tails native Persistent Storage is not supported on managed/multi-OS USBs; use the official Tails USB image on a dedicated device")
+			}
+			if item.KernelArgs != "" || item.KernelPath != "" || item.InitrdPath != "" {
+				return MultiOSPlan{}, fmt.Errorf("Tails must use its stock kernel, initrd and boot arguments")
+			}
 		}
 		if item.Persistence && !spec.SupportsPersistence {
 			return MultiOSPlan{}, fmt.Errorf("%s does not support persistence", spec.MenuLabel)
@@ -479,6 +506,7 @@ func buildMultiOSPlan(config RuntimeConfig, request MultiOSRequest) (MultiOSPlan
 			PayloadPartLabel:        payloadPartLabel,
 			PayloadISOName:          plannedPayloadISOName(isoPath, sourceRole),
 			OfflinePreseedSourceDir: offlinePreseedSourceDir,
+			HDMediaPreseedDirs:      cloneHDMediaPreseedDirs(hdMediaDirs),
 			MenuLabel:               menuLabel,
 			KernelArgs:              kernelArgs,
 			KernelPath:              strings.TrimSpace(item.KernelPath),

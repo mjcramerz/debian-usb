@@ -24,7 +24,10 @@
       "kernel_args": "",
       "menu_label": "",
       "kernel_path": "",
-      "initrd_path": ""
+      "initrd_path": "",
+      "live_tool_groups": [
+        "wireless_security"
+      ]
     },
     {
       "id": "debian-netinst",
@@ -44,7 +47,8 @@
       "kernel_args": "",
       "menu_label": "",
       "kernel_path": "",
-      "initrd_path": ""
+      "initrd_path": "",
+      "hd_media_preseed_dirs": {}
     },
     {
       "id": "debian-netboot",
@@ -64,7 +68,8 @@
       "kernel_args": "",
       "menu_label": "",
       "kernel_path": "",
-      "initrd_path": ""
+      "initrd_path": "",
+      "hd_media_preseed_dirs": {}
     },
     {
       "id": "kali-live",
@@ -84,7 +89,10 @@
       "kernel_args": "",
       "menu_label": "",
       "kernel_path": "",
-      "initrd_path": ""
+      "initrd_path": "",
+      "live_tool_groups": [
+        "wireless_security"
+      ]
     },
     {
       "id": "kali-netinst",
@@ -104,7 +112,8 @@
       "kernel_args": "",
       "menu_label": "",
       "kernel_path": "",
-      "initrd_path": ""
+      "initrd_path": "",
+      "hd_media_preseed_dirs": {}
     },
     {
       "id": "kali-netboot",
@@ -124,13 +133,14 @@
       "kernel_args": "",
       "menu_label": "",
       "kernel_path": "",
-      "initrd_path": ""
+      "initrd_path": "",
+      "hd_media_preseed_dirs": {}
     },
     {
       "id": "tails-live",
       "profile": "tails",
       "source_role": "primary",
-      "title": "Tails Live",
+      "title": "Tails Live (experimental, no persistence)",
       "iso_path": "/data/downloads/debian-usb/iso/tails_live_iso/tails-amd64-7.8.1.iso",
       "managed_payload_layout": "iso-store",
       "live_toram": false,

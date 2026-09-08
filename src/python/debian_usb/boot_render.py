@@ -31,6 +31,7 @@ from .config import (
     profile_persistence_labels,
     profile_live_kernel_extras,
     profile_preseed_url,
+    profile_preseed_internal_key,
 )
 from .constants import (
     MANAGED_PAYLOAD_LAYOUT_ISO_STORE,
@@ -391,7 +392,7 @@ def _kernel_arg_assignments(kernel_args: str) -> dict[str, str]:
 
 
 def _live_hook_kernel_args(config_data: dict[str, str], profile: str) -> str:
-    if profile != PROFILE_DEBIAN:
+    if profile not in {PROFILE_DEBIAN, PROFILE_KALI_LINUX}:
         return ""
     mandatory_args = " ".join(DEBIAN_LIVE_HOOK_KERNEL_ARGS)
     optional_args = ""
@@ -546,6 +547,14 @@ def _live_toram_kernel_arg(config_data: dict[str, str], profile: str) -> str:
 
 def _apply_live_settings(kernel_args: str, config_data: dict[str, str], profile: str, live_toram: bool | None = None) -> str:
     args = _remove_live_only_kernel_args(kernel_args)
+    if profile == PROFILE_TAILS:
+        # Do not inject Debian/Kali locale, login, hooks, Wi-Fi or debug policy.
+        # Tails' upstream security arguments are part of its security design.
+        if "boot=live" not in _split_kernel_args(args):
+            raise ValueError("Tails requires a detected upstream Live boot entry; a synthetic fallback is unsafe")
+        if live_toram:
+            args = _merge_kernel_args(args, _live_toram_kernel_arg(config_data, profile))
+        return args
     fallback_args = profile_fallback_live_kernel_args(config_data, profile)
     profile_meta = profile_for(profile)
     if profile_meta.live_boot_family == "casper" and "boot=casper" not in args:
@@ -718,7 +727,7 @@ def _apply_forensics_settings(kernel_args: str, config_data: dict[str, str], pro
 
 def _apply_preserved_live_settings(entry: BootEntry, profile: str, config_data: dict[str, str], live_toram: bool | None = None) -> str:
     kernel_args = _apply_live_settings(entry.kernel_args, config_data, profile, live_toram)
-    if entry.kind == "live-forensics":
+    if entry.kind == "live-forensics" and profile != PROFILE_TAILS:
         kernel_args = _apply_forensics_settings(kernel_args, config_data, profile)
     return kernel_args
 
@@ -731,6 +740,14 @@ def _finalize_kernel_args(
     persistence_label: str = "",
 ) -> str:
     args = _sanitize_live_kernel_args(kernel_args)
+    if profile == PROFILE_TAILS:
+        if persistence_mode != PERSISTENCE_MODE_NONE:
+            raise ValueError("Tails native Persistent Storage is not supported on managed/multi-OS USBs; use the official Tails USB image on a dedicated device")
+        args = _remove_kernel_args_matching(args, [
+            r"live-media=.*", r"persistence", r"persistent=cryptsetup",
+            r"persistence-(?:label|encryption|media|storage|method)=.*",
+        ])
+        return _merge_kernel_args(args, f"ignore_uuid live-media={_payload_device_path(live_uuid)} nopersistence")
     profile_meta = profile_for(profile)
     if profile_meta.live_boot_family == "casper":
         uuid_value = _payload_uuid_value(live_uuid)
@@ -772,8 +789,6 @@ def _finalize_kernel_args(
     args = _merge_kernel_args(args, "ignore_uuid")
     args = _merge_kernel_args(args, f"live-media={_payload_device_path(live_uuid)}")
     persistence_label = persistence_label.strip()
-    if profile == PROFILE_TAILS:
-        return args
     if persistence_mode == PERSISTENCE_MODE_ENCRYPTED:
         if profile in {PROFILE_DEBIAN, PROFILE_KALI_LINUX, PROFILE_TAILS}:
             args = _merge_kernel_args(
@@ -822,6 +837,8 @@ def resolve_live_boot(
     source = DirectorySource(root)
     entries = _find_boot_entries(source)
     selected_entry = _select_entry(profile, entries)
+    if profile == PROFILE_TAILS and (not selected_entry or kernel_args_override or kernel_path_override or initrd_path_override):
+        raise ValueError("Tails requires a detected stock boot entry without overrides")
 
     kernel_path = kernel_path_override or (selected_entry.kernel_path if selected_entry else "")
     initrd_path = initrd_path_override or (selected_entry.initrd_path if selected_entry else "")
@@ -893,6 +910,8 @@ def resolve_installer_boot(
 
 
 def _filter_entries_for_profile(profile: str, entries: list[BootEntry]) -> list[BootEntry]:
+    if profile == PROFILE_TAILS:
+        return [replace(entry, kind="live") if entry.kind.startswith("live") else entry for entry in entries]
     return entries
 
 
@@ -922,6 +941,8 @@ def _synthetic_live_entry(
     persistence_label: str = "",
     live_toram: bool | None = None,
 ) -> BootEntry:
+    if profile == PROFILE_TAILS and (template is None or kernel_args_override or kernel_path_override or initrd_path_override):
+        raise ValueError("Tails requires a detected stock boot entry without overrides")
     profile_meta = profile_for(profile)
     kernel_path = kernel_path_override or (template.kernel_path if template else "")
     initrd_path = initrd_path_override or (template.initrd_path if template else "")
@@ -1949,7 +1970,7 @@ def _load_custom_profile_spec(profile: str, source_role: str, media_class: str) 
 
 def _config_with_profile_preseed_url(config_data: dict[str, str], profile: str, url: str) -> dict[str, str]:
     updated = dict(config_data)
-    updated[f"{PROFILE_PREFIXES[profile]}_PRESEED_INTERNAL_URL"] = url.strip()
+    updated[profile_preseed_internal_key(profile)] = url.strip()
     return updated
 
 
@@ -2553,6 +2574,97 @@ def _append_live_variants(
         )
 
 
+def _installer_flavor_menu_entries(
+    *, spec: dict[str, object], base_entry: BootEntry | None,
+    family_spec: dict[str, object], profile_spec: dict[str, object],
+    config_data: dict[str, str], profile: str, source_role: str,
+    menu_path: tuple[str, ...], counter: list[int], payload_uuid: str,
+    asset_namespace: str, common_args_key: str,
+) -> list[BootEntry]:
+    """Build the Desktop/Server -> transport -> preset branch, never live entries."""
+    if base_entry is None:
+        return []
+    flavor = str(spec.get("installer_profile") or "")
+    if profile not in {PROFILE_DEBIAN, PROFILE_KALI_LINUX} or source_role not in {"netinst", "netboot"}:
+        raise ValueError("installer-profile-menu requires a Debian/Kali netinst or netboot source")
+    if flavor not in {"desktop", "server"}:
+        raise ValueError(f"invalid installer profile: {flavor}")
+    suffix = "de" if flavor == "desktop" else "srv"
+    family = "debian" if profile == PROFILE_DEBIAN else "kali"
+    member_dir = f"/.debian-usb/installer-profiles/{flavor}"
+    boot_dir = f"/{family}-{source_role}-{suffix}"
+    base_entry = replace(
+        base_entry, kernel_path=f"{member_dir}/vmlinuz", initrd_path=f"{member_dir}/initrd.gz",
+        boot_kernel_path=f"{boot_dir}/vmlinuz", boot_initrd_path=f"{boot_dir}/initrd.gz",
+    )
+    profile_menu = menu_path + (_custom_spec_string(spec.get("title"), "installer-profile-menu.title"),)
+    entries: list[BootEntry] = []
+    for transport_spec in _custom_spec_entries(spec.get("entries"), "installer-profile-menu.entries"):
+        if not isinstance(transport_spec, dict) or transport_spec.get("type") != "preseed-preset-menu":
+            raise ValueError("installer profile children must be preseed-preset-menu entries")
+        transport = str(transport_spec.get("transport") or "")
+        if transport not in {"https", "http", "initrd", "usb"}:
+            raise ValueError(f"invalid installer preseed transport: {transport}")
+        transport_path = profile_menu + (_custom_spec_string(transport_spec.get("title"), "transport.title"),)
+        location_key = str(transport_spec.get("preseed_file_key" if transport == "usb" else "preseed_url_key") or "")
+        location = config_data.get(location_key, "").strip() if location_key else ""
+        if transport in {"https", "http", "usb"} and not location_key:
+            raise ValueError(f"missing location config key for {transport}")
+        if transport in {"https", "http"} and not location:
+            entries.append(replace(
+                base_entry, title=f"Not configured: {location_key}", menu_path=transport_path,
+                order=_next_custom_order(counter), kind="other", kernel_path="", initrd_path="",
+                boot_kernel_path="", boot_initrd_path="", kernel_args="",
+                commands=(f'echo "Set {location_key} in debian-usb.conf, then regenerate GRUB."', "sleep 5"),
+            ))
+            continue
+        if transport in {"https", "http"} and not location.startswith(transport + "://"):
+            raise ValueError(f"{location_key} must use {transport}:// for this transport")
+        if transport == "usb" and not re.fullmatch(r"/hd-media/[A-Za-z0-9._+-]+/preseed\.cfg", location):
+            raise ValueError(f"invalid HD-MEDIA preseed path in {location_key}")
+        args_key = str(transport_spec.get("args_key") or "")
+        base_args = _remove_installer_seed_transport_args(base_entry.kernel_args)
+        for extra in (
+            config_data.get(common_args_key, ""),
+            config_data.get("DEFAULT_INSTALLER_KERNEL_EXTRAS", ""),
+            profile_installer_kernel_extras(config_data, profile),
+        ):
+            if extra.strip():
+                base_args = _merge_kernel_args(base_args, extra.strip())
+        presets = _preseed_preset_specs(family_spec, profile_spec, str(transport_spec.get("preset_set") or ""))
+        for preset in presets:
+            if not isinstance(preset, dict):
+                raise ValueError("invalid installer profile preset")
+            preset_key = _custom_spec_string(preset.get("args_key"), "preset.args_key")
+            if preset_key not in config_data:
+                raise ValueError(f"missing installer profile preset: {preset_key}")
+            preset_args = config_data[preset_key].strip()
+            args = _merge_kernel_args(base_args, preset_args)
+            if args_key and config_data.get(args_key, "").strip():
+                args = _merge_kernel_args(args, config_data[args_key].strip())
+            # Apply transport LAST, including after user preset/extras, so a stale
+            # file= or url= cannot override the selected source or leak into INITRD.
+            args = _remove_installer_seed_transport_args(args)
+            args = _merge_kernel_args(args, f"DUSB_PRESEED_MODE={transport}")
+            if transport in {"http", "https"}:
+                args = _set_installer_seed_transport(args, url=location)
+            elif transport == "usb":
+                args = _set_installer_seed_transport(args, seed_file=location)
+                if payload_uuid:
+                    args = _merge_kernel_args(args, f"DUSB_HD_MEDIA_UUID={payload_uuid}")
+            if source_role == "netinst" and payload_uuid:
+                args = _merge_kernel_args(args, f"shared/ask_device=manual shared/enter_device=/dev/disk/by-uuid/{payload_uuid}")
+            elif source_role == "netboot":
+                args = " ".join(token for token in _split_kernel_args(args) if not token.startswith(("shared/ask_device=", "shared/enter_device=", "iso-scan/filename=", "INSTALL_MEDIA_DEV=")))
+            args = _remove_live_only_kernel_args(_classes_last_kernel_args(args))
+            entries.append(_clone_custom_entry(
+                base_entry, title=" ".join(part for part in (str(transport_spec.get("title_prefix") or "").strip(), _custom_spec_string(preset.get("label"), "preset.label")) if part),
+                menu_path=transport_path, order=_next_custom_order(counter),
+                payload_uuid=payload_uuid, asset_namespace=asset_namespace, kernel_args=args,
+            ))
+    return entries
+
+
 def _build_fixed_debian_kali_entries(
     *,
     profile: str,
@@ -2601,6 +2713,19 @@ def _build_fixed_debian_kali_entries(
             if not isinstance(custom_spec, dict):
                 raise ValueError(f"invalid custom GRUB entry spec for {profile}/{source_role}: {field_prefix}")
             entry_type = _custom_spec_string(custom_spec.get("type"), f"{field_prefix}.type")
+            if entry_type == "installer-profile-menu":
+                base_entry = _custom_preseed_base_entry(
+                    base_kind="installer", manual_normal=manual_normal,
+                    automated_entry=automated_entry, expert_entry=expert_entry,
+                )
+                custom_entries.extend(_installer_flavor_menu_entries(
+                    spec=custom_spec, base_entry=base_entry, family_spec=family_spec,
+                    profile_spec=profile_spec, config_data=config_data, profile=profile,
+                    source_role=resolved_source_role, menu_path=menu_path, counter=counter,
+                    payload_uuid=payload_uuid, asset_namespace=asset_namespace,
+                    common_args_key=common_args_key,
+                ))
+                continue
             if entry_type == "live":
                 if live_entry is None:
                     continue
@@ -3711,8 +3836,11 @@ def render_managed_grub(
     effective_persistence_mode = persistence_mode.strip() or (PERSISTENCE_MODE_PLAIN if persistence else PERSISTENCE_MODE_NONE)
     if effective_persistence_mode not in {PERSISTENCE_MODE_NONE, PERSISTENCE_MODE_PLAIN, PERSISTENCE_MODE_ENCRYPTED}:
         raise ValueError("persistence mode must be one of: plain, encrypted")
-    if profile == PROFILE_TAILS and effective_persistence_mode == PERSISTENCE_MODE_PLAIN:
-        raise ValueError("Tails persistence must be encrypted")
+    if profile == PROFILE_TAILS:
+        if effective_persistence_mode != PERSISTENCE_MODE_NONE:
+            raise ValueError("Tails native Persistent Storage is not supported on managed/multi-OS USBs; use the official Tails USB image on a dedicated device")
+        if kernel_args_override or kernel_path_override or initrd_path_override:
+            raise ValueError("Tails must use its stock kernel, initrd and boot arguments")
     source_supports_encrypted_live = _supports_encrypted_persistence(source, entries, profile, profile_meta)
     if effective_persistence_mode == PERSISTENCE_MODE_ENCRYPTED and not source_supports_encrypted_live:
         raise ValueError(f"encrypted persistence is not supported for profile {profile} with {source.display_path}")

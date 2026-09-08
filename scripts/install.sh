@@ -51,7 +51,7 @@ EOF
 dusb_verify_installed_commands() {
   _dusb_missing=
   for _dusb_command in \
-    aria2c blkid blockdev cpio cryptsetup cert-to-efi-sig-list dd findmnt git go gpg \
+    aria2c blkid blockdev cpio cryptsetup cert-to-efi-sig-list dd fakeroot findmnt git go gpg \
     grub-install gzip lsblk lsinitramfs make mkfs.ext4 mkfs.vfat mount mountpoint \
     openssl parted partprobe python3 sbsign sbverify sign-efi-sig-list timeout umount xorriso
   do

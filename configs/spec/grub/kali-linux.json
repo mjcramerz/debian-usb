@@ -4,42 +4,82 @@
   "preseed": {
     "common_args_key": "PRESEED_COMMON_KERNEL_ARGS",
     "preset_sets": {
-      "kali": [
+      "kali-de": [
         {
           "label": " (ROLE=Desktop,GPU=Nvidia,NET=DHCP)",
-          "args_key": "PRESEED_ONE_ARGS_KALI"
+          "args_key": "PRESEED_ONE_ARGS_KALI_DE"
         },
         {
           "label": " (ROLE=Desktop,GPU=Nvidia,NET=Static)",
-          "args_key": "PRESEED_TWO_ARGS_KALI"
+          "args_key": "PRESEED_TWO_ARGS_KALI_DE"
         },
         {
           "label": " (ROLE=Desktop,GPU=Nvidia,NET=DHCP,BOOT=Dualboot)",
-          "args_key": "PRESEED_THREE_ARGS_KALI"
+          "args_key": "PRESEED_THREE_ARGS_KALI_DE"
         },
         {
           "label": " (ROLE=Desktop,GPU=Auto,NET=Static,BOOT=Dualboot)",
-          "args_key": "PRESEED_FOUR_ARGS_KALI"
+          "args_key": "PRESEED_FOUR_ARGS_KALI_DE"
         },
         {
           "label": " (ROLE=Desktop,GPU=Auto,NET=Static,REMOTE=SSH)",
-          "args_key": "PRESEED_FIVE_ARGS_KALI"
-        },
+          "args_key": "PRESEED_FIVE_ARGS_KALI_DE"
+        }
+      ],
+      "kali-srv": [
         {
           "label": " (ROLE=Server,GPU=Nvidia,NET=Static,REMOTE=SSH)",
-          "args_key": "PRESEED_SIX_ARGS_KALI"
+          "args_key": "PRESEED_ONE_ARGS_KALI_SRV"
         },
         {
           "label": " (ROLE=Server,GPU=Nvidia,NET=Static,REMOTE=SSH,BOOT=Dualboot)",
-          "args_key": "PRESEED_SEVEN_ARGS_KALI"
+          "args_key": "PRESEED_TWO_ARGS_KALI_SRV"
         },
         {
           "label": " (ROLE=Server,GPU=Auto,NET=DHCP,REMOTE=SSH,BOOT=Dualboot)",
-          "args_key": "PRESEED_EIGHT_ARGS_KALI"
+          "args_key": "PRESEED_THREE_ARGS_KALI_SRV"
         },
         {
           "label": " (ROLE=Server,GPU=Auto,NET=Static,REMOTE=SSH,BOOT=Dualboot)",
-          "args_key": "PRESEED_NINE_ARGS_KALI"
+          "args_key": "PRESEED_FOUR_ARGS_KALI_SRV"
+        }
+      ],
+      "kali": [
+        {
+          "label": " (ROLE=Desktop,GPU=Nvidia,NET=DHCP)",
+          "args_key": "PRESEED_ONE_ARGS_KALI_DE"
+        },
+        {
+          "label": " (ROLE=Desktop,GPU=Nvidia,NET=Static)",
+          "args_key": "PRESEED_TWO_ARGS_KALI_DE"
+        },
+        {
+          "label": " (ROLE=Desktop,GPU=Nvidia,NET=DHCP,BOOT=Dualboot)",
+          "args_key": "PRESEED_THREE_ARGS_KALI_DE"
+        },
+        {
+          "label": " (ROLE=Desktop,GPU=Auto,NET=Static,BOOT=Dualboot)",
+          "args_key": "PRESEED_FOUR_ARGS_KALI_DE"
+        },
+        {
+          "label": " (ROLE=Desktop,GPU=Auto,NET=Static,REMOTE=SSH)",
+          "args_key": "PRESEED_FIVE_ARGS_KALI_DE"
+        },
+        {
+          "label": " (ROLE=Server,GPU=Nvidia,NET=Static,REMOTE=SSH)",
+          "args_key": "PRESEED_ONE_ARGS_KALI_SRV"
+        },
+        {
+          "label": " (ROLE=Server,GPU=Nvidia,NET=Static,REMOTE=SSH,BOOT=Dualboot)",
+          "args_key": "PRESEED_TWO_ARGS_KALI_SRV"
+        },
+        {
+          "label": " (ROLE=Server,GPU=Auto,NET=DHCP,REMOTE=SSH,BOOT=Dualboot)",
+          "args_key": "PRESEED_THREE_ARGS_KALI_SRV"
+        },
+        {
+          "label": " (ROLE=Server,GPU=Auto,NET=Static,REMOTE=SSH,BOOT=Dualboot)",
+          "args_key": "PRESEED_FOUR_ARGS_KALI_SRV"
         }
       ]
     }
@@ -122,40 +162,90 @@
           "title": "Kali Netinst ...",
           "entries": [
             {
-              "type": "preseed-preset-menu",
-              "title": "Kali Netinst Install (HTTP Preseed) ...",
-              "base": "installer",
-              "transport": "http",
-              "title_prefix": "... Kali Netinst Install",
-              "preset_set": "kali",
-              "network_menus": [
+              "type": "installer-profile-menu",
+              "title": "KALI DESKTOP",
+              "installer_profile": "desktop",
+              "entries": [
                 {
-                  "title": "Preseed Internal ...",
-                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netinst Install (HTTPS WEB) ...",
+                  "base": "installer",
+                  "transport": "https",
+                  "title_prefix": "... Kali Netinst Install",
+                  "preset_set": "kali-de",
+                  "preseed_url_key": "KALI_LINUX_DE_PRESEED_PUBLIC_URL",
+                  "args_key": "KALI_LINUX_DE_PRESEED_PUBLIC_ARGS"
                 },
                 {
-                  "title": "Preseed Public ...",
-                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
-                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netinst Install (HTTP LAN) ...",
+                  "base": "installer",
+                  "transport": "http",
+                  "title_prefix": "... Kali Netinst Install",
+                  "preset_set": "kali-de",
+                  "preseed_url_key": "KALI_LINUX_DE_PRESEED_INTERNAL_URL",
+                  "args_key": "KALI_LINUX_DE_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netinst Install (INITRD PRESEED) ...",
+                  "base": "installer",
+                  "transport": "initrd",
+                  "title_prefix": "... Kali Netinst Install",
+                  "preset_set": "kali-de"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netinst Install (USB HD-MEDIA) ...",
+                  "base": "installer",
+                  "transport": "usb",
+                  "title_prefix": "... Kali Netinst Install",
+                  "preset_set": "kali-de",
+                  "preseed_file_key": "PRESEED_USB_KALI_DE_FILE"
                 }
               ]
             },
             {
-              "type": "preseed-preset-menu",
-              "title": "Kali Netinst Install (USB Preseed) ...",
-              "base": "installer",
-              "transport": "usb",
-              "title_prefix": "... Kali Netinst Install",
-              "preset_set": "kali",
-              "network_menus": [
+              "type": "installer-profile-menu",
+              "title": "KALI SERVER",
+              "installer_profile": "server",
+              "entries": [
                 {
-                  "title": "Preseed Internal ...",
-                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netinst Install (HTTPS WEB) ...",
+                  "base": "installer",
+                  "transport": "https",
+                  "title_prefix": "... Kali Netinst Install",
+                  "preset_set": "kali-srv",
+                  "preseed_url_key": "KALI_LINUX_SRV_PRESEED_PUBLIC_URL",
+                  "args_key": "KALI_LINUX_SRV_PRESEED_PUBLIC_ARGS"
                 },
                 {
-                  "title": "Preseed Public ...",
-                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
-                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netinst Install (HTTP LAN) ...",
+                  "base": "installer",
+                  "transport": "http",
+                  "title_prefix": "... Kali Netinst Install",
+                  "preset_set": "kali-srv",
+                  "preseed_url_key": "KALI_LINUX_SRV_PRESEED_INTERNAL_URL",
+                  "args_key": "KALI_LINUX_SRV_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netinst Install (INITRD PRESEED) ...",
+                  "base": "installer",
+                  "transport": "initrd",
+                  "title_prefix": "... Kali Netinst Install",
+                  "preset_set": "kali-srv"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netinst Install (USB HD-MEDIA) ...",
+                  "base": "installer",
+                  "transport": "usb",
+                  "title_prefix": "... Kali Netinst Install",
+                  "preset_set": "kali-srv",
+                  "preseed_file_key": "PRESEED_USB_KALI_SRV_FILE"
                 }
               ]
             }
@@ -189,40 +279,90 @@
           "title": "Kali Netboot ...",
           "entries": [
             {
-              "type": "preseed-preset-menu",
-              "title": "Kali Netboot Install (HTTP Preseed) ...",
-              "base": "installer",
-              "transport": "http",
-              "title_prefix": "... Kali Netboot Install",
-              "preset_set": "kali",
-              "network_menus": [
+              "type": "installer-profile-menu",
+              "title": "KALI DESKTOP",
+              "installer_profile": "desktop",
+              "entries": [
                 {
-                  "title": "Preseed Internal ...",
-                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netboot Install (HTTPS WEB) ...",
+                  "base": "installer",
+                  "transport": "https",
+                  "title_prefix": "... Kali Netboot Install",
+                  "preset_set": "kali-de",
+                  "preseed_url_key": "KALI_LINUX_DE_PRESEED_PUBLIC_URL",
+                  "args_key": "KALI_LINUX_DE_PRESEED_PUBLIC_ARGS"
                 },
                 {
-                  "title": "Preseed Public ...",
-                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
-                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netboot Install (HTTP LAN) ...",
+                  "base": "installer",
+                  "transport": "http",
+                  "title_prefix": "... Kali Netboot Install",
+                  "preset_set": "kali-de",
+                  "preseed_url_key": "KALI_LINUX_DE_PRESEED_INTERNAL_URL",
+                  "args_key": "KALI_LINUX_DE_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netboot Install (INITRD PRESEED) ...",
+                  "base": "installer",
+                  "transport": "initrd",
+                  "title_prefix": "... Kali Netboot Install",
+                  "preset_set": "kali-de"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netboot Install (USB HD-MEDIA) ...",
+                  "base": "installer",
+                  "transport": "usb",
+                  "title_prefix": "... Kali Netboot Install",
+                  "preset_set": "kali-de",
+                  "preseed_file_key": "PRESEED_USB_KALI_DE_FILE"
                 }
               ]
             },
             {
-              "type": "preseed-preset-menu",
-              "title": "Kali Netboot Install (USB Preseed) ...",
-              "base": "installer",
-              "transport": "usb",
-              "title_prefix": "... Kali Netboot Install",
-              "preset_set": "kali",
-              "network_menus": [
+              "type": "installer-profile-menu",
+              "title": "KALI SERVER",
+              "installer_profile": "server",
+              "entries": [
                 {
-                  "title": "Preseed Internal ...",
-                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netboot Install (HTTPS WEB) ...",
+                  "base": "installer",
+                  "transport": "https",
+                  "title_prefix": "... Kali Netboot Install",
+                  "preset_set": "kali-srv",
+                  "preseed_url_key": "KALI_LINUX_SRV_PRESEED_PUBLIC_URL",
+                  "args_key": "KALI_LINUX_SRV_PRESEED_PUBLIC_ARGS"
                 },
                 {
-                  "title": "Preseed Public ...",
-                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
-                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netboot Install (HTTP LAN) ...",
+                  "base": "installer",
+                  "transport": "http",
+                  "title_prefix": "... Kali Netboot Install",
+                  "preset_set": "kali-srv",
+                  "preseed_url_key": "KALI_LINUX_SRV_PRESEED_INTERNAL_URL",
+                  "args_key": "KALI_LINUX_SRV_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netboot Install (INITRD PRESEED) ...",
+                  "base": "installer",
+                  "transport": "initrd",
+                  "title_prefix": "... Kali Netboot Install",
+                  "preset_set": "kali-srv"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Kali Netboot Install (USB HD-MEDIA) ...",
+                  "base": "installer",
+                  "transport": "usb",
+                  "title_prefix": "... Kali Netboot Install",
+                  "preset_set": "kali-srv",
+                  "preseed_file_key": "PRESEED_USB_KALI_SRV_FILE"
                 }
               ]
             }
@@ -263,12 +403,12 @@
               "network_menus": [
                 {
                   "title": "Preseed Internal ...",
-                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                  "args_key": "DEBIAN_DE_PRESEED_INTERNAL_ARGS"
                 },
                 {
                   "title": "Preseed Public ...",
-                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
-                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                  "preseed_url_key": "DEBIAN_DE_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_DE_PRESEED_PUBLIC_ARGS"
                 }
               ]
             },
@@ -282,12 +422,12 @@
               "network_menus": [
                 {
                   "title": "Preseed Internal ...",
-                  "args_key": "DEBIAN_PRESEED_INTERNAL_ARGS"
+                  "args_key": "DEBIAN_DE_PRESEED_INTERNAL_ARGS"
                 },
                 {
                   "title": "Preseed Public ...",
-                  "preseed_url_key": "DEBIAN_PRESEED_PUBLIC_URL",
-                  "args_key": "DEBIAN_PRESEED_PUBLIC_ARGS"
+                  "preseed_url_key": "DEBIAN_DE_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_DE_PRESEED_PUBLIC_ARGS"
                 }
               ]
             }

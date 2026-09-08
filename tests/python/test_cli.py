@@ -260,10 +260,10 @@ class CLITests(unittest.TestCase):
                     ["validate-live-wifi-config", "--path", str(live_env)]
                 )
 
-            self.assertEqual(exit_code, 1)
-            self.assertEqual(stdout.getvalue(), "")
-            self.assertIn("must not contain single quote", stderr.getvalue())
-            self.assertNotIn("Publisher's Network", stderr.getvalue())
+            self.assertEqual(exit_code, 0)  # Literal apostrophes are valid SSID bytes.
+            self.assertEqual(json.loads(stdout.getvalue()), {"valid": True})
+            self.assertEqual(stderr.getvalue(), "")
+            self.assertNotIn("Publisher's Network", stdout.getvalue())
 
 
 if __name__ == "__main__":

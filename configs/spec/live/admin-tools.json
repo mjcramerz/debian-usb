@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "name": "Debian-family Live recovery and administration tools",
   "description": "Selectable packages installed into supported Debian-family Live root filesystems so storage recovery, firmware maintenance, networking, diagnostics, and routine administration do not depend on a boot-time package installation.",
   "supported_profiles": [
@@ -247,6 +247,34 @@
         "zstd",
         "lz4"
       ]
+    },
+    {
+      "id": "wireless_security",
+      "title": "Kali-only Wi-Fi penetration testing and defensive analysis",
+      "description": "Kali Live only: wireless assessment tools and upstream wireless metapackages. Never added to Debian or Ubuntu Live; unavailable optional tools are reported.",
+      "profiles": [
+        "kali-linux"
+      ],
+      "packages": [
+        "wifite",
+        "aircrack-ng",
+        "reaver",
+        "pixiewps",
+        "hcxdumptool",
+        "hcxtools",
+        "hashcat",
+        "tshark",
+        "wireshark",
+        "wavemon",
+        "horst",
+        "hostapd",
+        "arp-scan",
+        "tcpdump",
+        "python3-scapy",
+        "iw",
+        "rfkill",
+        "kismet"
+      ]
     }
   ],
   "command_packages": {
@@ -284,13 +312,40 @@
     "mount.nfs": "nfs-common",
     "mount.cifs": "cifs-utils",
     "iscsiadm": "open-iscsi",
-    "multipath": "multipath-tools"
+    "multipath": "multipath-tools",
+    "wifite": "wifite",
+    "aircrack-ng": "aircrack-ng",
+    "tshark": "tshark",
+    "wireshark": "wireshark",
+    "wavemon": "wavemon",
+    "hcxdumptool": "hcxdumptool",
+    "hcxpcapngtool": "hcxtools",
+    "kismet": "kismet"
   },
   "notes": [
     "The interactive application selects package groups only for supported Live or Hybrid media; Netinst and Netboot plans never receive this payload.",
     "The remaster path installs with --no-install-recommends and cleans downloaded package archives before repacking the squashfs.",
     "Package installation uses valid on-medium APT metadata when available and otherwise requires working configured network repositories during USB creation.",
     "CH341A SPI flashing is provided by flashrom's ch341a_spi programmer backend and intentionally retains flashrom's root-access requirement.",
-    "Tails is intentionally excluded because modifying its root filesystem would violate its upstream image integrity and security model."
-  ]
+    "Tails is intentionally excluded because modifying its root filesystem would violate its upstream image integrity and security model.",
+    "The wireless_security group is available only for Kali Live. Debian and Ubuntu All selections retain the original recovery/administration groups without wireless penetration-testing packages. Normal Wi-Fi connectivity is independent of this group.",
+    "Only use wireless assessment tools on networks you own or are authorized to test. These tools are installed but never run automatically.",
+    "Required packages fail the build on errors. Optional packages are resolved against the selected Live distro and recorded in /var/log/debian-usb/optional-packages.json; repository signature and dependency failures are never ignored."
+  ],
+  "profile_additions": {
+    "kali-linux": {
+      "wireless_security": [
+        "kali-tools-wireless",
+        "kali-tools-802-11",
+        "airgeddon",
+        "bettercap",
+        "wifiphisher"
+      ]
+    }
+  },
+  "optional_packages": {
+    "kali-linux": [
+      "horst"
+    ]
+  }
 }

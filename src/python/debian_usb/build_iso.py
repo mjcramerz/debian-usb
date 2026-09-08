@@ -17,6 +17,9 @@ from .boot_parse import _find_boot_entries, _select_text_installer_entry
 from .constants import PROFILE_DEBIAN
 from .iso_source import open_source
 from .live_hooks import (
+    live_hook_packages,
+    live_optional_firmware,
+    stage_live_wifi_runtime,
     DEBIAN_LIVE_HOOK_KERNEL_ARGS,
     DEBIAN_LIVE_HOOK_PACKAGES,
     DEBIAN_LIVE_INITRAMFS_MODULES,
@@ -34,7 +37,7 @@ from .live_hooks import (
     stage_live_kernel_module_policy,
     stage_live_systemd_masks,
 )
-from .live_tools import live_tool_packages_for_build_distro
+from .live_tools import live_tool_packages_for_build_distro, validate_live_tool_package_scope_for_build_distro
 
 SCHEMA_VERSION = 1
 FEATURE_SPEC_SCHEMA_VERSION = 1
@@ -554,11 +557,22 @@ def _materialize_workspace(build_root: Path, plan: dict[str, Any], log_file: Any
         live_dir.mkdir(parents=True, exist_ok=True)
         _write_value_list(live_dir / "filesystem.module", plan["filesystem_module_entries"])
 
-    if plan["distro"] == DISTRO_DEBIAN and not netinst_only:
-        stage_debian_live_wifi_config(includes_chroot_dir)
-        stage_debian_live_apt_policy(includes_chroot_dir)
-        stage_debian_live_config_hooks(includes_binary_dir / "live")
-        stage_debian_live_medium_wifi_config(includes_binary_dir / "live")
+    if plan["distro"] in {DISTRO_DEBIAN, "kali-linux"} and not netinst_only:
+        stage_live_wifi_runtime(includes_chroot_dir, profile=plan["distro"])
+        if plan["distro"] == DISTRO_DEBIAN:
+            stage_debian_live_apt_policy(includes_chroot_dir)
+        stage_debian_live_config_hooks(includes_binary_dir / "live", plan["distro"])
+        stage_debian_live_medium_wifi_config(includes_binary_dir / "live", profile=plan["distro"])
+        _write_initramfs_refresh_hook(hooks_dir / "7000-initramfs-modules.hook.chroot")
+
+    if plan.get("optional_live_packages") and not netinst_only:
+        helper = includes_chroot_dir / "usr/local/lib/debian-usb/live-packages.py"
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(Path(__file__).with_name("live_packages.py"), helper)
+        arguments = " ".join("--package " + package for package in plan["optional_live_packages"])
+        hook = hooks_dir / "6500-optional-live-packages.hook.chroot"
+        hook.write_text("#!/bin/sh\nset -eu\npython3 /usr/local/lib/debian-usb/live-packages.py --update " + arguments + "\n", encoding="utf-8")
+        hook.chmod(0o755)
 
     if plan["rootfs_format"] == "erofs" and not netinst_only:
         _write_erofs_binary_hook(
@@ -1849,20 +1863,26 @@ def _validate_build_iso_plan(plan: Any) -> dict[str, Any]:
         "cleanup_mode": _validate_choice(plan.get("cleanup_mode"), CLEANUP_MODES, "cleanup_mode"),
     }
     normalized["live_tool_profile"] = {}
+    normalized["optional_live_packages"] = []
     if normalized["installer_mode"] != "netinst":
         live_tool_packages, live_tool_profile = live_tool_packages_for_build_distro(
             normalized["distro"],
             selected_groups=normalized["live_tool_groups"],
         )
         normalized["live_tool_groups"] = list(live_tool_profile["selected_groups"])
+        normalized["optional_live_packages"] = list(live_tool_profile.get("optional_packages", [])) + live_optional_firmware(normalized["distro"])
+        if normalized["distro"] == "kali-linux":
+            normalized["optional_live_packages"] = _append_unique(live_tool_packages, normalized["optional_live_packages"])
+        if normalized["optional_live_packages"] and "python3" not in normalized["base_packages"]:
+            normalized["base_packages"].append("python3")
         normalized["storage_tool_packages"] = _append_unique(
             normalized["storage_tool_packages"],
-            live_tool_packages,
+            [package for package in live_tool_packages if package not in normalized["optional_live_packages"]],
         )
-        if normalized["distro"] == DISTRO_DEBIAN:
+        if normalized["distro"] in {DISTRO_DEBIAN, "kali-linux"}:
             normalized["base_packages"] = _append_unique(
                 normalized["base_packages"],
-                list(DEBIAN_LIVE_HOOK_PACKAGES),
+                live_hook_packages(normalized["distro"]),
             )
             normalized["initramfs_modules"] = _append_unique(
                 normalized["initramfs_modules"],
@@ -1899,6 +1919,12 @@ def _validate_build_iso_plan(plan: Any) -> dict[str, Any]:
     normalized["applied_feature_specs"] = _load_feature_specs_for_plan(normalized)
     for spec in normalized["applied_feature_specs"]:
         _merge_feature_spec_into_plan(normalized, spec)
+    if normalized["installer_mode"] != "netinst":
+        validate_live_tool_package_scope_for_build_distro(
+            normalized["distro"],
+            [package for field in ("base_packages", "storage_tool_packages", "extra_chroot_packages", "extra_binary_packages", "optional_live_packages")
+             for package in normalized[field]],
+        )
     normalized["udeb_rebuilds"] = _load_and_validate_udeb_rebuild_spec(normalized["udeb_rebuild_spec_path"])
     if normalized["udeb_rebuild_source_overlay_dir"]:
         if not normalized["udeb_rebuilds"]:

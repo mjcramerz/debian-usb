@@ -15,6 +15,7 @@ from .boot_render import (
     _entry_sort_key,
     _escape_grub_string,
     _filter_entries_for_secure_boot,
+    _filter_entries_for_profile,
     _filter_entries_for_source_role,
     _installer_initrd_patch_manifest,
     _installer_boot_initrd_patch_assets,
@@ -290,6 +291,8 @@ def validate_multios_plan(plan: dict[str, object], *, inspect_sources: bool = Fa
         item["iso_path"] = str(iso_path)
         if media_class:
             _validate_source_role_media(profile, source_role, media_class, iso_path)
+        from .installer_profiles import normalize_hd_media_dirs
+        item["hd_media_preseed_dirs"] = normalize_hd_media_dirs(profile, source_role, item.get("hd_media_preseed_dirs"))
         offline_preseed_source_dir = str(item.get("offline_preseed_source_dir") or "").strip()
         if offline_preseed_source_dir:
             offline_preseed_path = Path(offline_preseed_source_dir).expanduser().resolve()
@@ -315,7 +318,10 @@ def validate_multios_plan(plan: dict[str, object], *, inspect_sources: bool = Fa
         else:
             item["payload_fs_label"] = str(item.get("payload_fs_label") or "")
             item["payload_partlabel"] = str(item.get("payload_partlabel") or "")
-        persistence = bool(item.get("persistence", False))
+        persistence = item.get("persistence", False)
+        if not isinstance(persistence, bool):
+            raise ValueError(f"persistence must be a boolean for {profile}")
+        item["persistence"] = persistence
         live_toram = item.get("live_toram", False)
         if not isinstance(live_toram, bool):
             raise ValueError(f"live_toram must be a boolean for {profile}")
@@ -328,8 +334,12 @@ def validate_multios_plan(plan: dict[str, object], *, inspect_sources: bool = Fa
             item["persistence_mode"] = persistence_mode
         if persistence_mode not in {PERSISTENCE_MODE_NONE, PERSISTENCE_MODE_PLAIN, PERSISTENCE_MODE_ENCRYPTED}:
             raise ValueError(f"invalid persistence mode for {profile}: {persistence_mode}")
-        if profile == PROFILE_TAILS and persistence_mode == PERSISTENCE_MODE_PLAIN:
-            raise ValueError("Tails persistence must be encrypted")
+        if profile == PROFILE_TAILS:
+            if persistence:
+                raise ValueError("Tails native Persistent Storage is not supported on managed/multi-OS USBs; use the official Tails USB image on a dedicated device")
+            for field in ("kernel_args", "kernel_path", "initrd_path"):
+                if str(item.get(field) or "").strip():
+                    raise ValueError(f"Tails must use its stock ISO without {field} overrides")
         if persistence and not profile_meta.supports_persistence:
             raise ValueError(f"profile does not support persistence: {profile}")
         if source_role in {SOURCE_ROLE_NETINST, SOURCE_ROLE_NETBOOT}:
@@ -342,7 +352,7 @@ def validate_multios_plan(plan: dict[str, object], *, inspect_sources: bool = Fa
                     raise ValueError(f"{source_role} source cannot use live override field {field} for {profile}")
         if persistence:
             size = item.get("persistence_size_gib", 0)
-            if not isinstance(size, int) or size <= 0:
+            if type(size) is not int or size <= 0:
                 raise ValueError(f"persistence_size_gib must be a positive integer for {profile}")
             fs_label = _required_string(item, "persistence_fs_label", index)
             part_label = _required_string(item, "persistence_partlabel", index)
@@ -356,9 +366,22 @@ def validate_multios_plan(plan: dict[str, object], *, inspect_sources: bool = Fa
             if not bool(inspection.get("managed_supported")):
                 raise ValueError(f"Multi-OS ISO is not managed-capable for {profile}: {iso_path}")
             _validate_source_role_media(profile, source_role, str(inspection.get("media_class") or ""), iso_path)
+            if persistence and not bool(inspection.get("supports_persistence")):
+                raise ValueError(f"selected media does not support persistence for {profile}: {iso_path}")
             if persistence_mode == PERSISTENCE_MODE_ENCRYPTED and not bool(inspection.get("supports_encrypted_persistence")):
                 raise ValueError(f"encrypted persistence is not supported for {profile}: {iso_path}")
         validated_items.append(item)
+    persistence_labels: dict[str, str] = {}
+    for item in validated_items:
+        if not item["persistence"]:
+            continue
+        for field in ("persistence_fs_label", "persistence_partlabel"):
+            label = str(item[field])
+            owner = persistence_labels.setdefault(label, str(item["id"]))
+            if owner != item["id"]:
+                raise ValueError(f"persistence filesystem/GPT label collision: {label}")
+        if item.get("media_class") == "installer":
+            raise ValueError(f"installer media cannot enable Live persistence: {item['id']}")
     plan = dict(plan)
     plan["items"] = validated_items
     return plan
@@ -780,7 +803,7 @@ def _prepare_multios_item_entries(
     item_config_data = _config_for_payload_layout(config_data, profile, payload_layout)
     source = open_source(str(item["iso_path"]))
     item_config_data[_LIVE_TORAM_MODULE_CONFIG_KEY] = _live_toram_module_for_source(source, profile)
-    entries = _find_boot_entries(source)
+    entries = _filter_entries_for_profile(profile, _find_boot_entries(source))
     if "uefi" not in _detect_firmware(source):
         raise ValueError(f"managed mode requires UEFI-capable media: {source.display_path}")
     if not entries:
@@ -796,9 +819,8 @@ def _prepare_multios_item_entries(
     if persistence_mode == PERSISTENCE_MODE_ENCRYPTED and not supports_encrypted_live:
         raise ValueError(f"encrypted persistence is not supported for profile {profile} with {source.display_path}")
     if profile == PROFILE_TAILS:
-        # Tails exposes its ordinary live boot entries as live-persistence entries.
-        # Keep them intact so managed Multi-OS renders do not strip the only bootable
-        # entries when persistence is disabled.
+        # Stock Tails entries were normalized to nonpersistent Live entries
+        # by _filter_entries_for_profile; retain their upstream boot parameters.
         pass
     elif persistence_mode == PERSISTENCE_MODE_PLAIN:
         entries = [entry for entry in entries if entry.kind != "live-encrypted-persistence"]

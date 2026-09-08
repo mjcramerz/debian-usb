@@ -1,21 +1,47 @@
 {
   "family_id": "debian",
-  "preserved_title": "Saved Debian Imports ...",
+  "preserved_title": "Debian Legacy ...",
   "preseed": {
     "common_args_key": "PRESEED_COMMON_KERNEL_ARGS",
     "preset_sets": {
-      "debian": [
+      "debian-de": [
         {
-          "label": " (ROLE=Desktop,GPU=Nvidia,NET=DHCP)",
-          "args_key": "PRESEED_ONE_ARGS_DEBIAN"
+          "label": " [BTRFS Desktop][Main][479GiB Disk + 47935MiB RAM]",
+          "args_key": "PRESEED_ONE_ARGS_DEBIAN_DE"
         },
         {
-          "label": " (ROLE=Desktop,GPU=Nvidia,NET=Static)",
-          "args_key": "PRESEED_TWO_ARGS_DEBIAN"
+          "label": " [BTRFS Desktop][Main][Encrypted][479GiB Disk + 47935MiB RAM]",
+          "args_key": "PRESEED_TWO_ARGS_DEBIAN_DE"
         },
         {
-          "label": " (ROLE=TEST,GPU=Nvidia,NET=DHCP,BOOT=Dualboot)",
-          "args_key": "PRESEED_ELEVEN_ARGS_DEBIAN"
+          "label": " [BTRFS Desktop][Main][Dualboot][379GiB Disk + 47935MiB RAM]",
+          "args_key": "PRESEED_THREE_ARGS_DEBIAN_DE"
+        },
+        {
+          "label": " [BTRFS Desktop][Flex][Dualboot][379GiB Disk + 7489MiB RAM]",
+          "args_key": "PRESEED_FOUR_ARGS_DEBIAN_DE"
+        },
+        {
+          "label": " [F2FS Desktop][Cbook][32GiB Disk + 3424MiB RAM]",
+          "args_key": "PRESEED_FIVE_ARGS_DEBIAN_DE"
+        }
+      ],
+      "debian-srv": [
+        {
+          "label": " [BTRFS Server - GitLab Runner]",
+          "args_key": "PRESEED_ONE_ARGS_DEBIAN_SRV"
+        },
+        {
+          "label": " [F2FS Server - Pi-Hole]",
+          "args_key": "PRESEED_TWO_ARGS_DEBIAN_SRV"
+        },
+        {
+          "label": " [PLACEHOLDER]",
+          "args_key": "PRESEED_THREE_ARGS_DEBIAN_SRV"
+        },
+        {
+          "label": " [PLACEHOLDER]",
+          "args_key": "PRESEED_FOUR_ARGS_DEBIAN_SRV"
         }
       ]
     }
@@ -28,43 +54,44 @@
         "live",
         "hybrid"
       ],
-      "preserved": {
-        "title": "Saved Debian Live Entries ...",
-        "entry_title_template": "Saved: {title}",
-        "entry_title_overrides": [
-          {
-            "match_title": "Expert install",
-            "title": "Saved Expert Install"
-          }
-        ],
-        "include_kinds": [
-          "live",
-          "installer",
-          "expert-installer",
-          "rescue"
-        ],
-        "flatten_menu_path": false
-      },
       "menus": [
         {
-          "title": "Debian Live (Custom Labels) ...",
+          "title": "Debian Live ...",
           "entries": [
             {
               "type": "live",
-              "title": "... Debian Live Desktop",
+              "title": "... Debian Live Environment",
               "live_toram": false,
               "persistence_mode": "none"
             },
             {
               "type": "live",
-              "title": "... Debian Live Desktop (RAM)",
+              "title": "... Debian Live Environment (RAM)",
               "live_toram": true,
               "persistence_mode": "none"
             },
             {
               "type": "live",
-              "title": "... Debian Live Desktop (Encrypted Persistence)",
+              "title": "... Debian Live Environment (Persistence)",
               "live_toram": false,
+              "persistence_mode": "plain"
+            },
+            {
+              "type": "live",
+              "title": "... Debian Live Environment (RAM + Persistence)",
+              "live_toram": true,
+              "persistence_mode": "plain"
+            },
+            {
+              "type": "live",
+              "title": "... Debian Live Environment (Encrypted Persistence)",
+              "live_toram": false,
+              "persistence_mode": "encrypted"
+            },
+            {
+              "type": "live",
+              "title": "... Debian Live Environment (RAM + Encrypted Persistence)",
+              "live_toram": true,
               "persistence_mode": "encrypted"
             }
           ]
@@ -79,66 +106,108 @@
         {
           "type": "installer",
           "base": "installer",
-          "title": "... Debian Netinst Install (Legacy)"
+          "title": "... Debian Netinst Install"
         },
         {
           "type": "installer",
           "base": "expert",
-          "title": "... Debian Netinst Expert Install (Legacy)"
+          "title": "... Debian Netinst Expert Install"
         },
         {
           "type": "installer",
           "base": "rescue",
-          "title": "... Debian Netinst Rescue Environment (Legacy)"
+          "title": "... Debian Netinst Rescue Environment"
         }
       ],
       "menus": [
         {
-          "title": "Debian Netinst (Custom Labels) ...",
+          "title": "Debian Netinst ...",
           "entries": [
             {
-              "type": "installer",
-              "base": "installer",
-              "title": "... Debian Netinst Install (Direct)"
-            },
-            {
-              "type": "installer",
-              "base": "expert",
-              "title": "... Debian Netinst Expert Install (Direct)"
-            },
-            {
-              "type": "preseed-preset-menu",
-              "title": "Debian Netinst Install (HTTP Preseed) ...",
-              "base": "installer",
-              "transport": "http",
-              "title_prefix": "... Debian Netinst Install",
-              "preset_set": "debian",
-              "network_menus": [
+              "type": "installer-profile-menu",
+              "title": "DEBIAN DESKTOP",
+              "installer_profile": "desktop",
+              "entries": [
                 {
-                  "title": "Office LAN ...",
-                  "args_key": "PRESEED_ETHERNET_KERNEL_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netinst Install (HTTPS WEB) ...",
+                  "base": "installer",
+                  "transport": "https",
+                  "title_prefix": "... Debian Netinst Install",
+                  "preset_set": "debian-de",
+                  "preseed_url_key": "DEBIAN_DE_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_DE_PRESEED_PUBLIC_ARGS"
                 },
                 {
-                  "title": "Office Wi-Fi ...",
-                  "args_key": "PRESEED_WIFI_KERNEL_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netinst Install (HTTP LAN) ...",
+                  "base": "installer",
+                  "transport": "http",
+                  "title_prefix": "... Debian Netinst Install",
+                  "preset_set": "debian-de",
+                  "preseed_url_key": "DEBIAN_DE_PRESEED_INTERNAL_URL",
+                  "args_key": "DEBIAN_DE_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netinst Install (INITRD PRESEED) ...",
+                  "base": "installer",
+                  "transport": "initrd",
+                  "title_prefix": "... Debian Netinst Install",
+                  "preset_set": "debian-de"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netinst Install (USB HD-MEDIA) ...",
+                  "base": "installer",
+                  "transport": "usb",
+                  "title_prefix": "... Debian Netinst Install",
+                  "preset_set": "debian-de",
+                  "preseed_file_key": "PRESEED_USB_DEBIAN_DE_FILE"
                 }
               ]
             },
             {
-              "type": "preseed-preset-menu",
-              "title": "Debian Netinst Install (USB Preseed) ...",
-              "base": "installer",
-              "transport": "usb",
-              "title_prefix": "... Debian Netinst Install",
-              "preset_set": "debian",
-              "network_menus": [
+              "type": "installer-profile-menu",
+              "title": "DEBIAN SERVER",
+              "installer_profile": "server",
+              "entries": [
                 {
-                  "title": "Offline LAN ...",
-                  "args_key": "PRESEED_ETHERNET_KERNEL_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netinst Install (HTTPS WEB) ...",
+                  "base": "installer",
+                  "transport": "https",
+                  "title_prefix": "... Debian Netinst Install",
+                  "preset_set": "debian-srv",
+                  "preseed_url_key": "DEBIAN_SRV_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_SRV_PRESEED_PUBLIC_ARGS"
                 },
                 {
-                  "title": "Offline Wi-Fi ...",
-                  "args_key": "PRESEED_WIFI_KERNEL_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netinst Install (HTTP LAN) ...",
+                  "base": "installer",
+                  "transport": "http",
+                  "title_prefix": "... Debian Netinst Install",
+                  "preset_set": "debian-srv",
+                  "preseed_url_key": "DEBIAN_SRV_PRESEED_INTERNAL_URL",
+                  "args_key": "DEBIAN_SRV_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netinst Install (INITRD PRESEED) ...",
+                  "base": "installer",
+                  "transport": "initrd",
+                  "title_prefix": "... Debian Netinst Install",
+                  "preset_set": "debian-srv"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netinst Install (USB HD-MEDIA) ...",
+                  "base": "installer",
+                  "transport": "usb",
+                  "title_prefix": "... Debian Netinst Install",
+                  "preset_set": "debian-srv",
+                  "preseed_file_key": "PRESEED_USB_DEBIAN_SRV_FILE"
                 }
               ]
             }
@@ -154,56 +223,108 @@
         {
           "type": "installer",
           "base": "installer",
-          "title": "... Debian Netboot Install (Legacy)"
+          "title": "... Debian Netboot Install"
         },
         {
           "type": "installer",
           "base": "expert",
-          "title": "... Debian Netboot Expert Install (Legacy)"
+          "title": "... Debian Netboot Expert Install"
         },
         {
           "type": "installer",
           "base": "rescue",
-          "title": "... Debian Netboot Rescue Environment (Legacy)"
+          "title": "... Debian Netboot Rescue Environment"
         }
       ],
       "menus": [
         {
-          "title": "Debian Netboot (Custom Labels) ...",
+          "title": "Debian Netboot ...",
           "entries": [
             {
-              "type": "preseed-preset-menu",
-              "title": "Debian Netboot Install (HTTP Preseed) ...",
-              "base": "installer",
-              "transport": "http",
-              "title_prefix": "... Debian Netboot Install",
-              "preset_set": "debian",
-              "network_menus": [
+              "type": "installer-profile-menu",
+              "title": "DEBIAN DESKTOP",
+              "installer_profile": "desktop",
+              "entries": [
                 {
-                  "title": "Remote LAN ...",
-                  "args_key": "PRESEED_ETHERNET_KERNEL_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netboot Install (HTTPS WEB) ...",
+                  "base": "installer",
+                  "transport": "https",
+                  "title_prefix": "... Debian Netboot Install",
+                  "preset_set": "debian-de",
+                  "preseed_url_key": "DEBIAN_DE_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_DE_PRESEED_PUBLIC_ARGS"
                 },
                 {
-                  "title": "Remote Wi-Fi ...",
-                  "args_key": "PRESEED_WIFI_KERNEL_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netboot Install (HTTP LAN) ...",
+                  "base": "installer",
+                  "transport": "http",
+                  "title_prefix": "... Debian Netboot Install",
+                  "preset_set": "debian-de",
+                  "preseed_url_key": "DEBIAN_DE_PRESEED_INTERNAL_URL",
+                  "args_key": "DEBIAN_DE_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netboot Install (INITRD PRESEED) ...",
+                  "base": "installer",
+                  "transport": "initrd",
+                  "title_prefix": "... Debian Netboot Install",
+                  "preset_set": "debian-de"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netboot Install (USB HD-MEDIA) ...",
+                  "base": "installer",
+                  "transport": "usb",
+                  "title_prefix": "... Debian Netboot Install",
+                  "preset_set": "debian-de",
+                  "preseed_file_key": "PRESEED_USB_DEBIAN_DE_FILE"
                 }
               ]
             },
             {
-              "type": "preseed-preset-menu",
-              "title": "Debian Netboot Install (USB Preseed) ...",
-              "base": "installer",
-              "transport": "usb",
-              "title_prefix": "... Debian Netboot Install",
-              "preset_set": "debian",
-              "network_menus": [
+              "type": "installer-profile-menu",
+              "title": "DEBIAN SERVER",
+              "installer_profile": "server",
+              "entries": [
                 {
-                  "title": "Field LAN ...",
-                  "args_key": "PRESEED_ETHERNET_KERNEL_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netboot Install (HTTPS WEB) ...",
+                  "base": "installer",
+                  "transport": "https",
+                  "title_prefix": "... Debian Netboot Install",
+                  "preset_set": "debian-srv",
+                  "preseed_url_key": "DEBIAN_SRV_PRESEED_PUBLIC_URL",
+                  "args_key": "DEBIAN_SRV_PRESEED_PUBLIC_ARGS"
                 },
                 {
-                  "title": "Field Wi-Fi ...",
-                  "args_key": "PRESEED_WIFI_KERNEL_ARGS"
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netboot Install (HTTP LAN) ...",
+                  "base": "installer",
+                  "transport": "http",
+                  "title_prefix": "... Debian Netboot Install",
+                  "preset_set": "debian-srv",
+                  "preseed_url_key": "DEBIAN_SRV_PRESEED_INTERNAL_URL",
+                  "args_key": "DEBIAN_SRV_PRESEED_INTERNAL_ARGS"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netboot Install (INITRD PRESEED) ...",
+                  "base": "installer",
+                  "transport": "initrd",
+                  "title_prefix": "... Debian Netboot Install",
+                  "preset_set": "debian-srv"
+                },
+                {
+                  "type": "preseed-preset-menu",
+                  "title": "Debian Netboot Install (USB HD-MEDIA) ...",
+                  "base": "installer",
+                  "transport": "usb",
+                  "title_prefix": "... Debian Netboot Install",
+                  "preset_set": "debian-srv",
+                  "preseed_file_key": "PRESEED_USB_DEBIAN_SRV_FILE"
                 }
               ]
             }

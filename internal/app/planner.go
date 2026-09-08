@@ -74,6 +74,11 @@ func buildCreatePlan(config RuntimeConfig, req CreateRequest) (CreatePlan, error
 		return CreatePlan{}, err
 	}
 	req.SourceRole = sourceRole
+	hdMediaDirs, err := normalizeHDMediaPreseedDirs(req.Profile, sourceRole, req.HDMediaPreseedDirs)
+	if err != nil {
+		return CreatePlan{}, err
+	}
+	req.HDMediaPreseedDirs = hdMediaDirs
 	if !profileSupportsSourceRole(req.Profile, req.SourceRole) {
 		return CreatePlan{}, fmt.Errorf("%s does not support source role %s", spec.MenuLabel, req.SourceRole)
 	}
@@ -106,6 +111,14 @@ func buildCreatePlan(config RuntimeConfig, req CreateRequest) (CreatePlan, error
 	}
 	if !req.UseCustomGrubMenu {
 		req.PreserveUpstreamGrubEntries = false
+	}
+	if req.Profile == profileTails {
+		if req.Persistence {
+			return CreatePlan{}, fmt.Errorf("Tails native Persistent Storage requires an official Tails USB on a dedicated device")
+		}
+		if req.KernelArgs != "" || req.KernelPath != "" || req.InitrdPath != "" {
+			return CreatePlan{}, fmt.Errorf("Tails must use its stock kernel, initrd and boot arguments")
+		}
 	}
 	if req.Persistence && !spec.SupportsPersistence {
 		return CreatePlan{}, fmt.Errorf("%s does not support persistence", spec.MenuLabel)
@@ -150,11 +163,7 @@ func buildCreatePlan(config RuntimeConfig, req CreateRequest) (CreatePlan, error
 
 	persistenceMode := strings.TrimSpace(req.PersistenceMode)
 	if req.Persistence && persistenceMode == persistenceModeNone {
-		if req.Profile == profileTails {
-			persistenceMode = persistenceModeEncrypted
-		} else {
-			persistenceMode = persistenceModePlain
-		}
+		persistenceMode = persistenceModePlain
 	}
 	if !req.Persistence {
 		persistenceMode = persistenceModeNone
@@ -163,9 +172,6 @@ func buildCreatePlan(config RuntimeConfig, req CreateRequest) (CreatePlan, error
 	case persistenceModeNone, persistenceModePlain, persistenceModeEncrypted:
 	default:
 		return CreatePlan{}, fmt.Errorf("persistence mode must be plain or encrypted")
-	}
-	if req.Profile == profileTails && persistenceMode == persistenceModePlain {
-		return CreatePlan{}, fmt.Errorf("Tails persistence must be encrypted")
 	}
 	if persistenceMode == persistenceModeEncrypted && !inspection.SupportsEncryptedPersistence && !remasterEncryptedPersistenceEligible(spec, req.SourceRole, inspection) {
 		return CreatePlan{}, fmt.Errorf("encrypted persistence is not supported for this ISO/profile combination: %s", isoPath)
@@ -331,6 +337,8 @@ func buildCreatePlan(config RuntimeConfig, req CreateRequest) (CreatePlan, error
 			if profileUSBPreseedFile(config, req.Profile) == "" {
 				notes = append(notes, "The configured PRESEED_USB_*_FILE value for this profile is empty, so USB preseed entries will still render file= and preseed/file= with empty paths.")
 			}
+		} else if splitInstallerProfile(req.Profile, req.SourceRole) {
+			notes = append(notes, "Desktop/Server installer menus always include all four transports. HD-MEDIA copy selections: "+hdMediaPreseedSummary(req.HDMediaPreseedDirs)+". Unselected preseed directories are not modified.")
 		} else if req.Preseed {
 			hostPath := profileHostPreseedPath(config, req.Profile)
 			usbFile := profileUSBPreseedFile(config, req.Profile)
@@ -396,6 +404,7 @@ func buildCreatePlan(config RuntimeConfig, req CreateRequest) (CreatePlan, error
 		PreserveUpstreamGrubEntries: req.PreserveUpstreamGrubEntries,
 		Preseed:                     req.Preseed,
 		OfflinePreseedSourceDir:     req.OfflinePreseedSourceDir,
+		HDMediaPreseedDirs:          cloneHDMediaPreseedDirs(req.HDMediaPreseedDirs),
 		LiveToram:                   req.LiveToram,
 		Persistence:                 req.Persistence,
 		PersistenceMode:             persistenceMode,

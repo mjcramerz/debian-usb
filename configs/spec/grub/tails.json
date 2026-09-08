@@ -12,48 +12,24 @@
       "title": "Tails",
       "menu_kind": "live-basic",
       "labels": {
-        "live": "Tails Live",
-        "live_ram": "Tails Live (RAM)"
+        "live": "Tails Live (experimental, no persistence)",
+        "live_ram": "Tails Live (RAM, experimental, no persistence)"
       },
       "menus": [
         {
-          "title": "Tails Live ...",
+          "title": "Tails Live (experimental) ...",
           "entries": [
             {
               "type": "live",
-              "title": "... Tails Live Environment",
+              "title": "... Tails Live Environment [experimental, no persistence]",
               "live_toram": false,
               "persistence_mode": "none"
             },
             {
               "type": "live",
-              "title": "... Tails Live Environment (RAM)",
+              "title": "... Tails Live Environment (RAM) [experimental, no persistence]",
               "live_toram": true,
               "persistence_mode": "none"
-            },
-            {
-              "type": "live",
-              "title": "... Tails Live Environment (Persistence)",
-              "live_toram": false,
-              "persistence_mode": "plain"
-            },
-            {
-              "type": "live",
-              "title": "... Tails Live Environment (RAM + Persistence)",
-              "live_toram": true,
-              "persistence_mode": "plain"
-            },
-            {
-              "type": "live",
-              "title": "... Tails Live Environment (Encrypted Persistence)",
-              "live_toram": false,
-              "persistence_mode": "encrypted"
-            },
-            {
-              "type": "live",
-              "title": "... Tails Live Environment (RAM + Encrypted Persistence)",
-              "live_toram": true,
-              "persistence_mode": "encrypted"
             }
           ]
         }

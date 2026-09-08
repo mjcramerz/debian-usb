@@ -1,3 +1,5 @@
+> Historical architecture record. The September 8 behavior changes are in [REFRACTOR-2026-09-08.md](REFRACTOR-2026-09-08.md).
+
 # Deferred USB build pipeline and Live APT repair
 
 Revision date: 2026-09-05. See [VALIDATION.md](VALIDATION.md) for the executed checks and remaining hardware acceptance gates. This is a source release; it does not contain a prebuilt ISO or an assertion of firmware/hardware certification.

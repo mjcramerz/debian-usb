@@ -295,8 +295,10 @@ def _supports_encrypted_persistence(
         return False
     if profile not in {PROFILE_DEBIAN, PROFILE_KALI_LINUX, PROFILE_TAILS}:
         return False
-    if profile == PROFILE_TAILS and source.exists("/live/Tails.module"):
-        return True
+    if profile == PROFILE_TAILS:
+        # TailsData is managed by the native Tails USB partition/upgrade layout,
+        # not by generic live-boot persistence partitions in this writer.
+        return False
     initrd_path = _find_live_initrd_path(entries)
     initrd_supported = _initrd_supports_cryptsetup(source, initrd_path)
     if any(entry.kind == "live-encrypted-persistence" for entry in entries):
@@ -334,6 +336,10 @@ def inspect_media(
         top_level_entries.append(label)
 
     warnings: list[str] = []
+    if profile == PROFILE_TAILS:
+        warnings.append("Tails custom-GRUB/multiboot is experimental and unsupported by Tails. "
+                        "Use an unmodified stock ISO only, without generic persistence or remastering. "
+                        "For supported security, upgrades and Persistent Storage use the official USB image on a dedicated device.")
     if media_class == "utility":
         warnings.append("No Linux boot entries were detected in the media bootloader configs.")
     firmware = _detect_firmware(source)

@@ -32,11 +32,11 @@ func replaceConfigAssignmentForTest(t *testing.T, content, key, value string) st
 func TestValidateNoLegacySecretKernelArgsRejectsEveryManagedSecret(t *testing.T) {
 	for legacyName := range legacySecretKernelArgNames {
 		t.Run(legacyName, func(t *testing.T) {
-			err := validateNoLegacySecretKernelArgs("classes=test "+legacyName+"=fixture-value", "PRESEED_ONE_ARGS_DEBIAN")
+			err := validateNoLegacySecretKernelArgs("classes=test "+legacyName+"=fixture-value", "PRESEED_ONE_ARGS_DEBIAN_DE")
 			if err == nil {
 				t.Fatalf("expected %s to be rejected", legacyName)
 			}
-			if !strings.Contains(err.Error(), legacyName) || !strings.Contains(err.Error(), "initrd/debian/netinst/preseed.env") {
+			if !strings.Contains(err.Error(), legacyName) || !strings.Contains(err.Error(), "initrd/debian/netinst/desktop/preseed.env") {
 				t.Fatalf("expected key name and migration destination in error, got %v", err)
 			}
 		})
@@ -50,8 +50,8 @@ func TestLoadRuntimeConfigRejectsLegacySecretInDynamicPreseedArgs(t *testing.T) 
 	}
 	text := strings.Replace(
 		string(content),
-		`PRESEED_ONE_ARGS_DEBIAN="`,
-		`PRESEED_ONE_ARGS_DEBIAN="root_password=fixture-value `,
+		`PRESEED_ONE_ARGS_DEBIAN_DE="`,
+		`PRESEED_ONE_ARGS_DEBIAN_DE="root_password=fixture-value `,
 		1,
 	)
 	path := filepath.Join(t.TempDir(), "legacy-secret-preseed-args.conf")
@@ -60,7 +60,7 @@ func TestLoadRuntimeConfigRejectsLegacySecretInDynamicPreseedArgs(t *testing.T) 
 	}
 
 	_, err = loadRuntimeConfig(path)
-	if err == nil || !strings.Contains(err.Error(), "PRESEED_ONE_ARGS_DEBIAN") || !strings.Contains(err.Error(), "root_password") {
+	if err == nil || !strings.Contains(err.Error(), "PRESEED_ONE_ARGS_DEBIAN_DE") || !strings.Contains(err.Error(), "root_password") {
 		t.Fatalf("expected dynamic preseed secret rejection, got %v", err)
 	}
 }
@@ -217,7 +217,7 @@ func TestSaveRuntimeConfigPreservesAdditionalKeys(t *testing.T) {
 	if cfg.ExtraValues == nil {
 		t.Fatalf("expected repo config to expose additional preserved keys")
 	}
-	if got := cfg.ExtraValues["PRESEED_USB_DEBIAN_FILE"]; got == "" {
+	if got := cfg.ExtraValues["PRESEED_USB_DEBIAN_DE_FILE"]; got == "" {
 		t.Fatalf("expected additional Debian USB preseed file to be preserved, got %q", got)
 	}
 
@@ -230,7 +230,7 @@ func TestSaveRuntimeConfigPreservesAdditionalKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload runtime config: %v", err)
 	}
-	if got := reloaded.ExtraValues["PRESEED_USB_DEBIAN_FILE"]; got != cfg.ExtraValues["PRESEED_USB_DEBIAN_FILE"] {
+	if got := reloaded.ExtraValues["PRESEED_USB_DEBIAN_DE_FILE"]; got != cfg.ExtraValues["PRESEED_USB_DEBIAN_DE_FILE"] {
 		t.Fatalf("expected extra value to round-trip, got %q", got)
 	}
 }
@@ -362,7 +362,7 @@ func TestLoadRuntimeConfigSupportsLegacyKaliAliases(t *testing.T) {
 KALI_LIVE_KERNEL_EXTRAS="legacy-live"`, 1)
 	text = strings.Replace(text, `KALI_LINUX_INSTALLER_KERNEL_EXTRAS=""`, `KALI_LINUX_INSTALLER_KERNEL_EXTRAS=""
 KALI_INSTALLER_KERNEL_EXTRAS="legacy-installer"`, 1)
-	text = strings.Replace(text, `KALI_LINUX_PRESEED_INTERNAL_URL=""`, `KALI_LINUX_PRESEED_INTERNAL_URL=""
+	text = strings.Replace(text, `KALI_LINUX_DE_PRESEED_INTERNAL_URL=""`, `KALI_LINUX_DE_PRESEED_INTERNAL_URL=""
 	KALI_PRESEED_URL="https://example.test/kali.cfg"`, 1)
 
 	path := filepath.Join(t.TempDir(), "legacy-kali.conf")
@@ -382,5 +382,25 @@ KALI_INSTALLER_KERNEL_EXTRAS="legacy-installer"`, 1)
 	}
 	if got := cfg.ProfilePreseedURLs[profileKaliLinux]; got != "https://example.test/kali.cfg" {
 		t.Fatalf("expected legacy preseed alias to remap, got %q", got)
+	}
+}
+
+func TestRetiredInstallerHostPathsAreDropped(t *testing.T) {
+	values := map[string]string{
+		"PRESEED_HOST_DEBIAN_PATH":     "/old/debian/preseed.cfg",
+		"PRESEED_HOST_DEBIAN_DE_PATH":  "/desktop/preseed.cfg",
+		"PRESEED_HOST_DEBIAN_SRV_PATH": "/server/preseed.cfg",
+		"PRESEED_HOST_KALI_PATH":       "/old/kali/preseed.cfg",
+		"PRESEED_HOST_KALI_DE_PATH":    "/kali-desktop/preseed.cfg",
+		"PRESEED_HOST_KALI_SRV_PATH":   "/kali-server/preseed.cfg",
+	}
+	migrated := applyLegacyKeyAliases(values)
+	for key := range migrated {
+		if strings.HasPrefix(key, "PRESEED_HOST_DEBIAN_") || strings.HasPrefix(key, "PRESEED_HOST_KALI_") {
+			t.Fatalf("retired path survived migration: %s", key)
+		}
+	}
+	if _, err := loadRuntimeConfig(repoConfigPath()); err != nil {
+		t.Fatalf("configuration without retired host paths must load: %v", err)
 	}
 }

@@ -303,15 +303,15 @@ func TestCollectCreateRequestDefersMissingEncryptedPersistenceSupport(t *testing
 	}
 }
 
-func TestCollectCreateRequestDefersMissingTailsEncryptedPersistenceSupport(t *testing.T) {
+func TestCollectCreateRequestLeavesTailsUnmodifiedWithoutPersistence(t *testing.T) {
 	a, iso := selectionFixture(t, "live", false, "{iso}\n2\n1\ny\n1\n8\n")
 	a.backend.initrdRoot = "" // No optional Tails overlay installed in this fixture.
 	req, action, err := a.collectCreateRequest(profileSpecs[profileTails])
 	if err != nil || action != menuStay {
 		t.Fatalf("collect: %v %v", action, err)
 	}
-	if req.PersistenceMode != persistenceModeEncrypted || req.ISOPath != iso || req.Inspection.SupportsEncryptedPersistence {
-		t.Fatalf("expected deferred Tails crypto support: %#v", req)
+	if req.PersistenceMode != persistenceModeNone || req.Persistence || req.ISOPath != iso || req.Inspection.SupportsEncryptedPersistence {
+		t.Fatalf("expected Tails without generic persistence or remaster: %#v", req)
 	}
 }
 
@@ -495,20 +495,11 @@ func TestChoosePersistenceModeCanDisablePersistence(t *testing.T) {
 	}
 }
 
-func TestChoosePersistenceModeForTailsIsEncryptedOnly(t *testing.T) {
-	application := App{
-		reader: bufio.NewReader(strings.NewReader("1\n")),
-	}
-
+func TestChoosePersistenceModeForTailsRefusesGenericPersistence(t *testing.T) {
+	application := App{reader: bufio.NewReader(strings.NewReader("1\n"))}
 	mode, cancelled, err := application.choosePersistenceModeForProfile(profileTails)
-	if err != nil {
-		t.Fatalf("choose Tails persistence mode: %v", err)
-	}
-	if cancelled {
-		t.Fatal("did not expect Tails persistence mode selection to cancel")
-	}
-	if mode != persistenceModeEncrypted {
-		t.Fatalf("expected encrypted Tails persistence mode, got %q", mode)
+	if err == nil || !cancelled || mode != persistenceModeNone {
+		t.Fatalf("expected refusal without consuming a persistence choice: %q %v %v", mode, cancelled, err)
 	}
 }
 

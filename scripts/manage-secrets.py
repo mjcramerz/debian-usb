@@ -262,6 +262,20 @@ def _initrd_targets(repo_root: Path) -> list[Path]:
     return targets
 
 
+def _active_secret_targets(repo_root: Path) -> list[tuple[Path, tuple[str, ...]]]:
+    # The legacy file is supported only when still present in an old checkout.
+    targets = [(repo_root / "initrd/debian/netinst/preseed.env", PRESEED_SECRET_KEYS)]
+    targets.extend(
+        (repo_root / f"initrd/{family}/{role}/{flavor}/preseed.env", PRESEED_SECRET_KEYS)
+        for family in ("debian", "kali")
+        for role in ("netinst", "netboot")
+        for flavor in ("desktop", "server")
+    )
+    targets.extend((repo_root / f"initrd/{family}/live/live.env", LIVE_SECRET_KEYS)
+                   for family in ("debian", "kali"))
+    return targets
+
+
 def _optional_targets(repo_root: Path) -> list[Path]:
     candidates: set[Path] = set()
     for pattern in (
@@ -271,12 +285,7 @@ def _optional_targets(repo_root: Path) -> list[Path]:
     ):
         candidates.update(repo_root.glob(pattern))
     candidates.update(_initrd_targets(repo_root))
-    candidates.difference_update(
-        {
-            repo_root / "initrd/debian/netinst/preseed.env",
-            repo_root / "initrd/debian/live/live.env",
-        }
-    )
+    candidates.difference_update(path for path, _ in _active_secret_targets(repo_root))
     return sorted(path for path in candidates if _rewritable_optional(path))
 
 
@@ -574,10 +583,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         relative = config_path.relative_to(repo_root).as_posix()
         changes.update(("worktree", relative, key) for key in cleared_keys)
-        for target, keys in (
-            (repo_root / "initrd/debian/netinst/preseed.env", PRESEED_SECRET_KEYS),
-            (repo_root / "initrd/debian/live/live.env", LIVE_SECRET_KEYS),
-        ):
+        for target, keys in _active_secret_targets(repo_root):
             if _rewritable_optional(target):
                 cleared_keys = _rewrite_file(
                     target,

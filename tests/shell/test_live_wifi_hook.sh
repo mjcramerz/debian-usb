@@ -154,7 +154,7 @@ fi
 lw_configure_address wlan-test 192.0.2.44/24 192.0.2.1
 route_log=$(cat "${command_log}")
 printf '%s\n' "${route_log}" | grep -Fq 'ip addr replace 192.0.2.44/24 dev wlan-test' || fail "static Wi-Fi address was not configured"
-printf '%s\n' "${route_log}" | grep -Fq 'ip -4 route add default via 192.0.2.1 dev wlan-test metric 600' || fail "Wi-Fi default route did not receive metric 600"
+printf '%s\n' "${route_log}" | grep -Fq 'ip -4 route add default via 192.0.2.1 dev wlan-test metric 50' || fail "Wi-Fi default route did not receive metric 50"
 ! printf '%s\n' "${route_log}" | grep -Fq eth || fail "Wi-Fi routing touched an Ethernet interface"
 
 : >"${command_log}"
@@ -168,7 +168,7 @@ lw_has_other_default_route() { return 0; }
 lw_configure_nameservers wlan-test '192.0.2.53,198.51.100.53'
 resolver_log=$(cat "${command_log}")
 printf '%s\n' "${resolver_log}" | grep -Fq 'resolvectl dns wlan-test 192.0.2.53 198.51.100.53' || fail "per-link DNS was not configured"
-printf '%s\n' "${resolver_log}" | grep -Fq 'resolvectl default-route wlan-test no' || fail "Wi-Fi DNS displaced an existing default-route link"
+printf '%s\n' "${resolver_log}" | grep -Fq 'resolvectl default-route wlan-test yes' || fail "Wi-Fi DNS did not take priority"
 
 # Full automatic path: all values must come from the private file.
 auto_marker=${temp_root}/automatic-connect

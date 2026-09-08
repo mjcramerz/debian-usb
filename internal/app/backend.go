@@ -442,9 +442,9 @@ func (b *Backend) remasterLiveToolsSource(profile, sourceISOPath string, groups 
 
 func liveSourceNeedsRemaster(profile string, groups []string) bool {
 	switch profile {
-	case profileDebian:
+	case profileDebian, profileKaliLinux:
 		return true
-	case profileKaliLinux, profileUbuntuDesktop:
+	case profileUbuntuDesktop:
 		return groups == nil || len(groups) > 0
 	default:
 		return false
@@ -517,6 +517,11 @@ func (b *Backend) executeCreate(plan CreatePlan, devicePath string, persistenceS
 		args = append(args, "--use-custom-grub-menu", boolFlag(plan.UseCustomGrubMenu))
 		args = append(args, "--preserve-upstream-grub-entries", boolFlag(plan.PreserveUpstreamGrubEntries))
 		args = append(args, "--include-preseed", boolFlag(plan.Preseed))
+		for _, flavor := range []string{"desktop", "server"} {
+			if source := plan.HDMediaPreseedDirs[flavor]; source != "" {
+				args = append(args, "--hd-media-preseed-"+flavor, source)
+			}
+		}
 		if plan.OfflinePreseedSourceDir != "" {
 			args = append(args, "--offline-preseed-dir", plan.OfflinePreseedSourceDir)
 		}
@@ -556,6 +561,9 @@ func (b *Backend) executeMultiOSCreate(plan MultiOSPlan, devicePath string, requ
 	// Validate every selected input before preparing even the first item.
 	for _, item := range plan.Items {
 		if err := item.Preparation.validate(blankIfEmpty(item.SourceRole, multiOSSourceRolePrimary)); err != nil {
+			return fmt.Errorf("%s: %w", item.Title, err)
+		}
+		if _, err := validateLiveToolGroupSelection(item.Profile, item.LiveToolGroups); err != nil {
 			return fmt.Errorf("%s: %w", item.Title, err)
 		}
 	}

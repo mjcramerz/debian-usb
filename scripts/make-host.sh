@@ -259,7 +259,11 @@ dusb_install() (
   dusb_install_tree "${repo_root}/configs/spec" "${specdir}"
   dusb_install_tree "${repo_root}/configs/preseed" "${preseeddir}"
   dusb_install_tree "${repo_root}/initrd" "${initrddir}"
-  chmod 0600 "${initrddir}/debian/live/live.env" || dusb_die "failed to protect Live environment file"
+  for family in debian kali; do
+    if [ -f "${initrddir}/${family}/live/live.env" ]; then
+      chmod 0600 "${initrddir}/${family}/live/live.env" || dusb_die "failed to protect Live environment file"
+    fi
+  done
   install -m 0644 -- "${repo_root}/configs/persistence-debian.conf" "${persistencedir}/debian.conf"
   install -m 0644 -- "${repo_root}/configs/persistence-kali.conf" "${persistencedir}/kali.conf"
   dusb_install_tree "${repo_root}/src/python/debian_usb" "${pythondir}/debian_usb"

@@ -92,11 +92,11 @@ var profileSpecs = map[string]profileSpec{
 		MenuLabel:             "Tails",
 		MultiOSLabel:          "Tails",
 		SupportsManaged:       true,
-		SupportsPersistence:   true,
+		SupportsPersistence:   false,
 		PreferredMedia:        "live",
-		SupportsLiveOverrides: true,
+		SupportsLiveOverrides: false,
 		LiveBootFamily:        "live-boot",
-		DefaultLiveMenuLabel:  "Tails Live",
+		DefaultLiveMenuLabel:  "Tails Live (experimental, no persistence)",
 	},
 }
 

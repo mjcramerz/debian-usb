@@ -57,7 +57,8 @@ type Device struct {
 }
 
 type CreateRequest struct {
-	Preparation *SourcePreparation
+	HDMediaPreseedDirs map[string]string
+	Preparation        *SourcePreparation
 
 	Profile                     string
 	SourceRole                  string
@@ -89,7 +90,8 @@ type MultiOSRequest struct {
 }
 
 type MultiOSRequestItem struct {
-	Preparation *SourcePreparation
+	HDMediaPreseedDirs map[string]string
+	Preparation        *SourcePreparation
 
 	Profile            string
 	SourceRole         string
@@ -125,7 +127,8 @@ type ISOInspection struct {
 }
 
 type CreatePlan struct {
-	TargetDevice *Device `json:"target_device,omitempty"`
+	HDMediaPreseedDirs map[string]string `json:"hd_media_preseed_dirs,omitempty"`
+	TargetDevice       *Device           `json:"target_device,omitempty"`
 
 	Preparation *SourcePreparation `json:"source_preparation,omitempty"`
 
@@ -187,7 +190,8 @@ type MultiOSPlan struct {
 }
 
 type MultiOSPlanItem struct {
-	Preparation *SourcePreparation `json:"source_preparation,omitempty"`
+	HDMediaPreseedDirs map[string]string  `json:"hd_media_preseed_dirs,omitempty"`
+	Preparation        *SourcePreparation `json:"source_preparation,omitempty"`
 
 	ID                      string   `json:"id"`
 	Profile                 string   `json:"profile"`

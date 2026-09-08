@@ -1,4 +1,5 @@
 from __future__ import annotations
+from installer_fixture import write_installer_initrd
 
 from contextlib import contextmanager
 import json
@@ -55,7 +56,7 @@ class InstallerSourceTests(unittest.TestCase):
         postinst.parent.mkdir(parents=True, exist_ok=True)
         postinst.write_text(cls._upstream_iso_scan_postinst_text(), encoding="utf-8")
         postinst.chmod(0o755)
-        installer_sources._repack_initrd_archive(tree_root, archive_path)
+        write_installer_initrd(archive_path, tree_root)
 
     @unittest.skipUnless(all(shutil.which(command) for command in ("cpio", "find", "gzip")), "requires cpio/find/gzip")
     def test_overlay_preseed_and_exact_iso_policy_share_one_archive_pass(self) -> None:
@@ -286,11 +287,11 @@ class InstallerSourceTests(unittest.TestCase):
             initrd = root / "initrd.gz"
             iso = root / "debian-netinst.iso"
             kernel.write_text("kernel", encoding="utf-8")
-            initrd.write_text("initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             iso.write_text("iso", encoding="utf-8")
 
             def fake_rebuild(**kwargs: object) -> dict[str, object]:
-                Path(kwargs["initrd_path"]).write_text("rebuilt-initrd", encoding="utf-8")
+                write_installer_initrd(Path(kwargs["initrd_path"]))
                 return {"rebuild_mode": "module-tree-copy", "kernel_version": "7.0.13+deb14-amd64"}
 
             with self._accept_installer_only_payload(), patch(
@@ -313,7 +314,7 @@ class InstallerSourceTests(unittest.TestCase):
 
             rebuild.assert_called_once()
             self.assertEqual(bundle["selected_extra_modules"], ["xxhash_generic", "lz4"])
-            self.assertEqual((root / "bundle" / "hd-media" / "initrd.gz").read_text(encoding="utf-8"), "rebuilt-initrd")
+            self.assertTrue((root / "bundle" / "hd-media" / "initrd.gz").read_bytes().startswith(b"\x1f\x8b"))
             self.assertFalse((root / "bundle" / "install.amd").exists())
             self.assertEqual(bundle["initrd_rebuild"]["kernel_version"], "7.0.13+deb14-amd64")
 
@@ -328,11 +329,20 @@ class InstallerSourceTests(unittest.TestCase):
             initrd = root / "downloaded-initrd.gz"
             iso = root / "debian-netinst.iso"
             kernel.write_text("kernel", encoding="utf-8")
-            initrd.write_text("downloaded-initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             iso.write_text("opaque-netinst-iso", encoding="utf-8")
 
             def fake_rebuild(**kwargs: object) -> dict[str, object]:
-                self._write_test_iso_scan_initrd(Path(kwargs["initrd_path"]), root / "rebuilt-initrd-tree")
+                # The production rebuilder edits the shared extraction session.
+                # Keep this test double faithful now that compatibility is
+                # inspected before module edits (do not replace its archive behind it).
+                session = kwargs["session"]
+                tree = session.tree()
+                postinst = tree / "var/lib/dpkg/info/iso-scan.postinst"
+                postinst.parent.mkdir(parents=True, exist_ok=True)
+                postinst.write_text(self._upstream_iso_scan_postinst_text(), encoding="utf-8")
+                postinst.chmod(0o755)
+                session.changed = True
                 return {"rebuild_mode": "module-tree-copy", "kernel_version": "7.0.13+deb14-amd64"}
 
             with patch(
@@ -363,13 +373,22 @@ class InstallerSourceTests(unittest.TestCase):
                 )
 
             rebuild.assert_called_once()
-            self.assertEqual(initrd.read_text(encoding="utf-8"), "downloaded-initrd")
+            self.assertTrue(initrd.read_bytes().startswith(b"\x1f\x8b"))
             extracted = root / "prepared-initrd"
             installer_sources._extract_initrd_archive(Path(bundle["initrd_path"]), extracted)
             patched_postinst = (extracted / "var/lib/dpkg/info/iso-scan.postinst").read_text(encoding="utf-8")
             self.assertEqual(patched_postinst.count(installer_sources.ISO_SCAN_EXACT_SELECTION_MARKER), 1)
             self.assertTrue(bundle["iso_scan_selection"]["enforced"])
             self.assertTrue(bundle["iso_scan_selection"]["changed"])
+            for flavor in ("desktop", "server"):
+                archive = root / "bundle/.debian-usb/installer-profiles" / flavor / "initrd.gz"
+                expanded_flavor = root / ("prepared-" + flavor)
+                installer_sources._extract_initrd_archive(archive, expanded_flavor)
+                script = (expanded_flavor / "var/lib/dpkg/info/iso-scan.postinst").read_text(encoding="utf-8")
+                self.assertEqual(script.count(installer_sources.ISO_SCAN_EXACT_SELECTION_MARKER), 1)
+                transport = json.loads((expanded_flavor / "lib/debian-usb/transport.json").read_text(encoding="utf-8"))
+                self.assertEqual(transport["version"], 2)
+                self.assertTrue((expanded_flavor / "lib/debian-installer-startup.d/S05fixture-seed-observer").is_file())
             source_manifest = json.loads(Path(bundle["manifest_path"]).read_text(encoding="utf-8"))
             self.assertTrue(source_manifest["iso_scan_filename_enforced"])
             self.assertEqual(
@@ -384,38 +403,21 @@ class InstallerSourceTests(unittest.TestCase):
             initrd = root / "downloaded-initrd.gz"
             overlay = root / "initrd/debian/netboot"
             kernel.write_text("netboot-kernel", encoding="utf-8")
-            initrd.write_text("netboot-initrd", encoding="utf-8")
-            overlay.mkdir(parents=True)
-            (overlay / "stage-marker").write_text("netboot\n", encoding="utf-8")
-            overlay_manifest = {
-                "overlay_dir": str(overlay.resolve()),
-                "embedded_root": "/",
-            }
-
-            with patch(
-                "debian_usb.installer_sources._embed_initrd_overlay_into_initrd",
-                return_value=overlay_manifest,
-            ) as embed_overlay:
-                bundle = installer_sources.prepare_managed_installer_source(
-                    "debian",
-                    "netboot",
-                    str(kernel),
-                    str(initrd),
-                    output_dir=str(root / "bundle"),
-                    initrd_overlay_dir=str(overlay),
-                )
-
-            bundled_initrd = root / "bundle/netboot/initrd.gz"
-            embed_overlay.assert_called_once_with(
-                initrd_path=bundled_initrd,
-                overlay_dir=overlay.resolve(),
-                bundle_root=root / "bundle",
-                session=ANY,
-            )
-            self.assertEqual(bundle["initrd_overlay"], overlay_manifest)
-            source_manifest = json.loads(Path(bundle["manifest_path"]).read_text(encoding="utf-8"))
-            self.assertTrue(source_manifest["initrd_overlay_included"])
-            self.assertEqual(source_manifest["initrd_overlay_manifest"], "/.debian-usb/installer/initrd-overlay-manifest.json")
+            write_installer_initrd(initrd)
+            (overlay / "desktop").mkdir(parents=True)
+            (overlay / "desktop/stage-marker").write_text("netboot\n", encoding="utf-8")
+            bundle = installer_sources.prepare_managed_installer_source(
+                "debian", "netboot", str(kernel), str(initrd),
+                output_dir=str(root / "bundle"), initrd_overlay_dir=str(overlay))
+            for flavor in ("desktop", "server"):
+                archive = root / "bundle/.debian-usb/installer-profiles" / flavor / "initrd.gz"
+                expanded = root / ("expanded-" + flavor)
+                installer_sources._extract_initrd_archive(archive, expanded)
+                self.assertEqual((expanded / "stage-marker").exists(), flavor == "desktop")
+            self.assertEqual((root / "bundle/netboot/initrd.gz").read_bytes(), initrd.read_bytes())
+            manifest = json.loads(Path(bundle["manifest_path"]).read_text(encoding="utf-8"))
+            self.assertTrue(manifest["initrd_overlay_included"])
+            self.assertEqual(manifest["initrd_overlay_manifest"], "/.debian-usb/installer-profiles/manifest.json")
             self.assertFalse((root / "bundle/payload").exists())
 
     @unittest.skipUnless(
@@ -571,7 +573,7 @@ class InstallerSourceTests(unittest.TestCase):
             initrd = root / "downloaded-initrd.gz"
             iso = root / "debian-netinst.iso"
             kernel.write_text("hd-media-kernel", encoding="utf-8")
-            initrd.write_text("hd-media-initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             iso.write_text("opaque-netinst-iso", encoding="utf-8")
 
             with self._accept_installer_only_payload(), patch(
@@ -615,7 +617,7 @@ class InstallerSourceTests(unittest.TestCase):
             initrd = root / "downloaded-initrd.gz"
             iso = root / "debian-netinst.iso"
             kernel.write_text("hd-media-kernel", encoding="utf-8")
-            initrd.write_text("hd-media-initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             iso.write_text("opaque-netinst-iso", encoding="utf-8")
             initrd.chmod(0o600)
             iso.chmod(0o600)
@@ -635,7 +637,7 @@ class InstallerSourceTests(unittest.TestCase):
 
             bundle_root = Path(bundle["source_path"])
             self.assertEqual((bundle_root / "hd-media/vmlinuz").read_text(encoding="utf-8"), "hd-media-kernel")
-            self.assertEqual((bundle_root / "hd-media/initrd.gz").read_text(encoding="utf-8"), "hd-media-initrd")
+            self.assertEqual((bundle_root / "hd-media/initrd.gz").read_bytes(), initrd.read_bytes())
             self.assertEqual((bundle_root / "payload/debian-netinst.iso").read_text(encoding="utf-8"), "opaque-netinst-iso")
             self.assertEqual((bundle_root / "payload/debian-netinst.iso").stat().st_mode & 0o777, 0o644)
             self.assertEqual((bundle_root / "hd-media/initrd.gz").stat().st_mode & 0o777, 0o644)
@@ -654,7 +656,7 @@ class InstallerSourceTests(unittest.TestCase):
             initrd = root / "downloaded-initrd.gz"
             iso = root / "debian-netinst.iso"
             kernel.write_text("hd-media-kernel", encoding="utf-8")
-            initrd.write_text("hd-media-initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             iso.write_text("opaque-netinst-iso", encoding="utf-8")
             bundle_root = root / "bundle"
             for stale_file in (
@@ -694,7 +696,7 @@ class InstallerSourceTests(unittest.TestCase):
             initrd = root / "initrd.gz"
             iso = root / "debian-netinst.iso"
             kernel.write_bytes(b"")
-            initrd.write_text("initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             iso.write_text("iso", encoding="utf-8")
 
             with self._accept_installer_only_payload(), patch(
@@ -718,7 +720,7 @@ class InstallerSourceTests(unittest.TestCase):
             initrd = root / "initrd.gz"
             iso = root / "debian-netinst.iso"
             kernel.write_text("kernel", encoding="utf-8")
-            initrd.write_text("initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             iso.write_text("iso", encoding="utf-8")
 
             with self._accept_installer_only_payload(), patch(
@@ -748,7 +750,7 @@ class InstallerSourceTests(unittest.TestCase):
             initrd = root / "initrd.gz"
             iso = root / "debian-netinst.iso"
             kernel.write_text("kernel", encoding="utf-8")
-            initrd.write_text("initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             iso.write_text("iso", encoding="utf-8")
 
             with self._accept_installer_only_payload(), patch(
@@ -884,7 +886,7 @@ class InstallerSourceTests(unittest.TestCase):
             bundle_root = root / "bundle"
             initrd = root / "initrd.gz"
             kernel = root / "vmlinuz"
-            initrd.write_text("initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             kernel.write_text("kernel", encoding="utf-8")
             with patch.object(installer_sources, "DEFAULT_WORK_DIR", root / "work"), patch.object(
                 installer_sources, "DEFAULT_STATE_DIR", root / "state"
@@ -943,7 +945,7 @@ class InstallerSourceTests(unittest.TestCase):
             bundle_root = root / "bundle"
             initrd = root / "initrd.gz"
             kernel = root / "vmlinuz"
-            initrd.write_text("initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             kernel.write_text("kernel", encoding="utf-8")
             with patch.object(installer_sources, "DEFAULT_WORK_DIR", root / "work"), patch.object(
                 installer_sources, "DEFAULT_STATE_DIR", root / "state"
@@ -978,7 +980,7 @@ class InstallerSourceTests(unittest.TestCase):
             bundle_root = root / "bundle"
             initrd = root / "initrd.gz"
             kernel = root / "vmlinuz"
-            initrd.write_text("initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             kernel.write_text("kernel", encoding="utf-8")
             with patch.object(installer_sources, "DEFAULT_WORK_DIR", root / "work"), patch.object(
                 installer_sources, "DEFAULT_STATE_DIR", root / "state"
@@ -1008,7 +1010,7 @@ class InstallerSourceTests(unittest.TestCase):
             bundle_root = root / "bundle"
             initrd = root / "initrd.gz"
             kernel = root / "vmlinuz"
-            initrd.write_text("initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             kernel.write_text("kernel", encoding="utf-8")
             with patch.object(installer_sources, "DEFAULT_WORK_DIR", root / "work"), patch.object(
                 installer_sources, "DEFAULT_STATE_DIR", root / "state"
@@ -1075,7 +1077,7 @@ class InstallerSourceTests(unittest.TestCase):
             (module_tree_root / "kernel" / "crypto" / "xxhash_generic.ko.xz").write_text("", encoding="utf-8")
             (module_tree_root / "kernel" / "crypto" / "lz4.ko.xz").write_text("", encoding="utf-8")
             inspect_kernel_support.return_value["module_tree_dir"] = str(module_tree_root)
-            initrd.write_text("initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             kernel.write_text("kernel", encoding="utf-8")
 
             def fake_extract_initrd(_archive_path: Path, destination_dir: Path) -> None:
@@ -1159,7 +1161,7 @@ class InstallerSourceTests(unittest.TestCase):
             (module_tree_root / "kernel" / "lib" / "lz4").mkdir(parents=True, exist_ok=True)
             (module_tree_root / "kernel" / "crypto" / "xxhash.ko.xz").write_text("", encoding="utf-8")
             (module_tree_root / "kernel" / "lib" / "lz4" / "lz4_compress.ko.xz").write_text("", encoding="utf-8")
-            initrd.write_text("initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             kernel.write_text("kernel", encoding="utf-8")
             inspect_kernel_support.return_value["module_tree_dir"] = str(module_tree_root)
 
@@ -1218,7 +1220,7 @@ class InstallerSourceTests(unittest.TestCase):
             bundle_root = root / "bundle"
             initrd = root / "initrd.gz"
             kernel = root / "vmlinuz"
-            initrd.write_text("initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             kernel.write_text("kernel", encoding="utf-8")
             with patch.object(installer_sources, "DEFAULT_WORK_DIR", root / "work"), patch.object(
                 installer_sources, "DEFAULT_STATE_DIR", root / "state"

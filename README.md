@@ -1,13 +1,21 @@
 # debian-usb
 
+**Installer preseed repair, revision r3:** [Failure analysis, validation, and upgrade instructions](docs/PRESEED-TRANSPORT-REPAIR-2026-09-08.md). Replaces the incorrect native-loader count check, preserves the original loader, fixes netboot USB file-URL handling, and records transport v2 for each Desktop/Server archive.
+
+**September 8 refactor:** [Installer, persistence, Kali and Wi-Fi changes](docs/REFRACTOR-2026-09-08.md). The complete source includes regression tests; Tails in a custom multi-OS layout is experimental and intentionally has no generic persistence or remastering.
+
 **Deferred-build refactor:** [Architecture and behavior](docs/REFACTOR.md) | [Validation and deployment gates](docs/VALIDATION.md). Select everything, review the actual target disk, and confirm before any source download, build, remaster, or USB mutation.
 
 DEBCONF_DEBUG=5 for debugging.
 
-## Debian Netinst Testing ISO
+## Historical pinned Debian source examples
+
+These July 2026 URLs were supplied with the project; they are not claims about the latest release. Use the application's configured/current download resolution for new builds.
+
+### Debian Netinst Testing ISO
 https://cdimage.debian.org/cdimage/daily-builds/daily/20260704-7/amd64/iso-cd/
 
-## Debian Netinst Initrd and Vmlinuz
+### Debian Netinst Initrd and Vmlinuz
 https://d-i.debian.org/daily-images/amd64/20260704-04:51/hd-media/initrd.gz
 https://d-i.debian.org/daily-images/amd64/20260704-04:51/hd-media/vmlinuz
 
@@ -172,7 +180,7 @@ Edit those files before `make install` if you want the installed app to start wi
 
 Managed live and installer kernel behavior is controlled through Settings. The renderer merges the configured live, installer, forensics, and per-profile extras into curated and preserved entries during the managed render.
 
-Debian Live payloads receive repo-managed live-config hooks under `/live/config-hooks`. These hooks and their required runtime packages are staged into custom Debian Live builds, existing Debian Live remasters, and raw Debian Live ISO payloads even when the user explicitly selects no optional administration tools. `live-config.hooks=medium` is mandatory on Debian Live boot entries so the medium hooks execute. `DEFAULT_LIVE_HOOKS` can gate only additional non-Wi-Fi tokens from `DEFAULT_LIVE_ARGS_HOOKS`; it cannot disable the managed APT/Wi-Fi hooks, and every canonical or legacy Wi-Fi kernel argument is stripped or rejected. Kali, Ubuntu, Tails, Debian Netinst, and Debian Netboot do not receive the Debian APT or Wi-Fi hooks, firmware bundle, or hook selector.
+Debian Live payloads receive repo-managed live-config hooks under `/live/config-hooks`. These hooks and their required runtime packages are staged into custom Debian Live builds, existing Debian Live remasters, and raw Debian Live ISO payloads even when the user explicitly selects no optional administration tools. `live-config.hooks=medium` is mandatory on Debian Live boot entries so the medium hooks execute. `DEFAULT_LIVE_HOOKS` can gate only additional non-Wi-Fi tokens from `DEFAULT_LIVE_ARGS_HOOKS`; it cannot disable the managed APT/Wi-Fi hooks, and every canonical or legacy Wi-Fi kernel argument is stripped or rejected. Kali Live receives the shared Wi-Fi runtime and hook selector, its own environment file and signing keyring, and candidate-resolved firmware. It never receives Debian APT source repair. Ubuntu, Tails, Netinst and Netboot do not receive this shared Live policy.
 
 The Debian Live initramfs policy writes the explicit module list to `/usr/share/initramfs-tools/modules.d/debian-usb-live`, sets `MODULES=most` in `/usr/share/initramfs-tools/conf.d/debian-usb-live`, and mirrors the list to `/etc/modules-load.d/debian-usb-live.conf` for deterministic userspace loading. Existing-ISO remasters rebuild and replace every Live initrd referenced by a Live boot entry after staging this policy. The required module groups are:
 
@@ -190,7 +198,7 @@ At Debian Live boot, the APT policy runs from inside the rootfs, so it remains a
 
 If there is no enabled network source, a Debian-keyring-signed fallback is added for the validated suite, with updates/security stanzas for bullseye/bookworm/trixie. A non-Debian root or invalid suite is not assigned guessed repositories. The local ISO source uses `Trusted: yes` only for that local medium: authenticate and trust source ISOs before building. This does not disable network repository signature checks. See [the APT design and limitations](docs/REFACTOR.md#live-apt-real-repository-data-not-a-fake-index).
 
-Debian Live Wi-Fi configuration comes only from `initrd/debian/live/live.env`:
+Debian Live reads `initrd/debian/live/live.env`; Kali Live reads `initrd/kali/live/live.env`. Configure each independently. Both use these keys:
 
 | Key | Debian Live behavior |
 | --- | --- |
@@ -198,7 +206,7 @@ Debian Live Wi-Fi configuration comes only from `initrd/debian/live/live.env`:
 | `LIVE_WIFI_ESSID` | Network name. An empty value disables automatic Wi-Fi setup. |
 | `LIVE_WIFI_SECURITY` | `open`, `wpa` for WPA2-PSK/RSN, or `sae` for WPA3-SAE with required management-frame protection. |
 | `LIVE_WIFI_CIDR` | Optional static IPv4 address/prefix. An empty value requests IPv4 through DHCP. |
-| `LIVE_WIFI_GATEWAY` | Optional static IPv4 default gateway; the Wi-Fi route is normalized to metric `600`. |
+| `LIVE_WIFI_GATEWAY` | Optional static IPv4 default gateway; Wi-Fi uses route metric `50`, active Ethernet is adjusted to `600`. |
 | `LIVE_WIFI_NAMESERVERS` | Optional comma- or whitespace-separated IPv4 resolver list. |
 | `LIVE_WIFI_PASSPHRASE` | WPA2 accepts 8-63 UTF-8 bytes or a 64-digit hexadecimal PSK; SAE accepts 1-63 UTF-8 bytes; open networks ignore it. |
 
@@ -211,17 +219,25 @@ Live squashfs root: /etc/debian-usb/live.env
 Live medium:        /live/debian-usb-live.env
 ```
 
-The Debian Live Create and Multi-OS paths also apply `initrd/debian/live` automatically to every referenced Debian Live initrd; this overlay is required rather than prompted. Its POSIX `init-bottom` helper copies `/live.env` to `/run/initramfs/debian-usb/live.env` with mode `0600`. At boot, `1000-network-wifi.sh` checks the initramfs handoff first, then the squashfs copy and the standard Live-medium mount locations. It reads only the seven `LIVE_WIFI_*` assignments, does not use `source` or `eval`, never logs the passphrase, and skips safely when no ESSID or required credential is configured.
+The Debian and Kali Live Create/Multi-OS paths automatically apply their own required `initrd/<family>/live` overlays to referenced Live initrds. After all package changes, the final initramfs hook copies the validated `/etc/debian-usb/live.env` to `/live.env` with mode `0600`. Its init-bottom helper hands this to `/run/initramfs/debian-usb/live.env`. Network configuration runs in the full Live system, not in the initramfs; Wi-Fi tools belong in the squashfs root.
 
-When configured, the hook unblocks Wi-Fi, waits for the requested interface (or detects one), verifies that the ESSID is visible, generates a private `wpa_supplicant` configuration, performs bounded association, applies the static IPv4 settings or runs DHCP, installs the requested gateway, and applies the configured nameservers. Ethernet and any other established link remain up; Wi-Fi receives default-route metric `600`, and per-link DNS is prevented from displacing a resolver owned by another default-route interface.
+The shared Python runtime uses NetworkManager and never starts a competing supplicant. It scans for the exact visible ESSID before activating Wi-Fi. Wi-Fi route metric is `50` for IPv4/IPv6; active Ethernet metrics are temporarily raised to `600`, and dispatcher events maintain the preference. Negative DNS priority prefers Wi-Fi DNS while that connection is active. Existing Ethernet connections are never deliberately disconnected; an absent ESSID leaves existing links unchanged. This is link/SSID fallback, not internet/captive-portal reachability monitoring. VPN-specific DNS policies, hidden SSIDs, WEP and enterprise EAP are outside this simple runtime's scope.
+
+Run `~/wifi-connect.sh` to change networks. The launcher is installed in existing Live home directories and `/etc/skel` for accounts created at boot; a system copy is at `/usr/local/bin/wifi-connect.sh`. It asks for interface, ESSID, open/WPA2/WPA3 security, optional static IPv4 CIDR/gateway, nameservers and a hidden passphrase. A root-only NetworkManager keyfile is written atomically; credentials never appear in process arguments. Failed activation restores the previous keyfile and leaves Ethernet available, but does not promise to reactivate a previously connected Wi-Fi network. Manual configuration is saved into the Live root after successful activation and survives reboot only when that root is persistent.
 
 Mode `0600` on staged and generated copies prevents ordinary users in the running system or staged build tree from reading the file; repository source modes are intentionally unconstrained. This does not encrypt the media. Any ISO or initrd containing `LIVE_WIFI_PASSPHRASE` must be treated as sensitive because a person with the image can extract it.
 
 ### Live recovery and administration tools
 
-`configs/spec/live/admin-tools.json` is the single source of truth for the ordered Live tool groups and package payload. Single-OS Create, Multi-OS Create, and custom Live ISO build flows now begin with one compact choice: `s) Select Tools`, `n) None`, or `a) All` (plus Back and Exit). `Select Tools` opens the numbered group-toggle screen and starts empty for a new selection, while an existing selection is preserved when it is edited. `None` immediately records an explicit empty selection, and `All` immediately records every catalog group; a new flow no longer silently defaults to all tools. An explicit empty selection adds no optional tools, while Debian Live still receives the mandatory APT/Wi-Fi hook runtime packages.
+`configs/spec/live/admin-tools.json` is the single source of truth for the ordered Live tool groups and package payload. Single-OS Create, Multi-OS Create, and custom Live ISO build flows now begin with one compact choice: `s) Select Tools`, `n) None`, or `a) All` (plus Back and Exit). `Select Tools` opens the numbered group-toggle screen and starts empty for a new selection, while an existing selection is preserved when it is edited. `None` immediately records an explicit empty selection, and `All` immediately records every group available for the selected distribution; a new flow no longer silently defaults to all tools. An explicit empty selection adds no optional tools, while Debian and Kali Live still receive mandatory Wi-Fi runtime packages; Debian additionally keeps its APT repair policy.
 
-For an existing supported Live ISO, the backend completes and validates the remaster before it invokes the USB writer. The writer receives only the remastered ISO path; a remaster error therefore stops before any device mutation. Multi-OS plans are cloned for execution, and the writer receives a prepared-source flag so it cannot remaster the same ISO a second time. Netinst, Netboot, and installer-only media bypass Live tool remastering. Tails does not receive administration-tool groups; an explicitly selected overlay/required crypto preparation can still use the combined Live preparation path.
+For an existing supported Live ISO, the backend completes and validates the remaster before it invokes the USB writer. The writer receives only the remastered ISO path; a remaster error therefore stops before any device mutation. Multi-OS plans are cloned for execution, and the writer receives a prepared-source flag so it cannot remaster the same ISO a second time. Netinst, Netboot, and installer-only media bypass Live tool remastering. Tails accepts neither administration-tool groups, custom initrd overlays nor generic plain/encrypted persistence. Stock ISO boot under custom GRUB is experimental, not a native or supported Tails installation.
+
+**Wireless penetration-testing tools are Kali Live only.** The `wireless_security` group is not displayed or selected for Debian/Ubuntu, including `All` and default backend remasters. Debian's original 20 recovery/administration groups (93 unique optional packages) are retained. Its normal NetworkManager/WPA Wi-Fi connectivity, `live.env`, and `wifi-connect.sh` are unchanged. For Kali, select **Kali-only Wi-Fi penetration testing and defensive analysis** or **All** to include the full wireless group and Kali wireless metapackages; **None** adds no optional tool groups. Existing packages in an input ISO are not uninstalled.
+
+The Go planner, saved execution preflight, and Python resolver enforce the same schema-3 distribution scope. A stale Debian plan explicitly containing `wireless_security` is rejected before remastering or writes; remove that group from the Debian item only, or reselect its tools. Legacy schema-2 catalog overrides are rejected with an upgrade instruction. Use the shipped `configs/spec/live/admin-tools.json` when upgrading; do not overwrite it with an older copy.
+
+Run `make check-live-tool-scope` for the focused regression suite, or `make check` for all checks. See `docs/KALI-ONLY-WIRELESS-REPAIR-2026-09-08.md` for validation and upgrade details.
 
 The catalog includes storage/filesystem, networking, firmware, diagnostics, recovery, and general administration groups, including these command providers:
 
@@ -244,7 +260,7 @@ The `Firmware and SPI programmer tools` group adds CH341A-compatible SPI flash a
 
 The same profile also covers common partitioning, LVM, MD RAID, LUKS, SMART, filesystem repair/recovery, packet capture, DNS, routing, SSH/rsync, firewall, hardware inventory, tracing, terminal, archive, and process-inspection tools. Custom live-build images place selected packages in both the chroot and binary package lists so the tools are present in the squashfs and the generated medium archive is non-empty. Existing-ISO remasters install into the squashfs with `--no-install-recommends`; downloaded package archives are cleaned before repacking. Final generated and remastered Live roots remove the `fwupd-refresh.timer` enablement link and statically mask both `fwupd-refresh.timer` and `fwupd-refresh.service`; managed Live GRUB entries repeat those masks through `systemd.mask=` kernel arguments. Masks are applied after package installation, not in the early live-build include tree. Remaster package installation temporarily removes only the managed firmware-refresh masks while a temporary `policy-rc.d` refusal prevents maintainer scripts from starting services through the bind-mounted chroot runtime. This lets `deb-systemd-helper` run its presets without encountering a masked timer. The masks are reinstated and timer enablement removed on success and failure, before the policy file is removed or restored. The chroot daemon-reload and policy-rc.d exit-101 messages are expected service-start suppression, not failed package installation. Debian Live tool roots also install `locales`, generate `en_US.UTF-8`, and select `LANG=en_US.UTF-8` with `LANGUAGE=en_US:en`; chroot package and maintenance commands use `C.UTF-8` until that locale is available. If upstream `/etc/default/locale` is a relative or absolute chroot-style symlink, the remaster preserves it and updates or creates its root-contained regular-file target; escaping, looping, directory, and symlinked-directory targets are rejected.
 
-The remaster helper supports Debian Live, Kali Live, and the backend's Ubuntu Desktop/Casper Live profile for optional tool installation, but only Debian receives the APT/Wi-Fi policy described above. A remaster source must expose a squashfs Live root filesystem and must match the host architecture when the ISO architecture can be inferred. If all requested packages are not present in the ISO's own complete APT archive, working configured network repositories are required during remastering. Remastering needs enough temporary disk space to extract and repack the complete Live root filesystem, and it produces a new ISO whose upstream whole-image checksum/signature no longer matches the original even though bootloader assets are replayed and internal checksum files are regenerated.
+The remaster helper supports Debian Live, Kali Live, and the backend's Ubuntu Desktop/Casper Live profile for optional tool installation, with shared Wi-Fi support for Debian/Kali and Debian-only APT repair. Kali tools and firmware are resolved in Kali repositories; unavailable optional candidates are recorded in `/var/log/debian-usb/optional-packages.json`, while APT signature, dependency and installation failures are fatal. A remaster source must expose a squashfs Live root filesystem and must match the host architecture when the ISO architecture can be inferred. If all requested packages are not present in the ISO's own complete APT archive, working configured network repositories are required during remastering. Remastering needs enough temporary disk space to extract and repack the complete Live root filesystem, and it produces a new ISO whose upstream whole-image checksum/signature no longer matches the original even though bootloader assets are replayed and internal checksum files are regenerated.
 
 Live administration-tool remasters keep their transient extraction tree under `/data/tmp/debian-usb/remaster-live-tools/<run-id>/` (or `DEBIAN_USB_WORK_DIR`), state under `/var/lib/debian-usb/remaster-live-tools/<run-id>/`, and logs under `/var/log/debian-usb/remaster-live-tools/`. Before extracting the ISO and again before expanding its squashfs, the helper verifies both free bytes and free inodes on every involved filesystem, aggregating requirements when work and output share one filesystem. The transient tree is removed after success or failure only after confirming that no mount remains beneath it; partial output ISOs are removed after a failed output write. Squashfs inspection, extraction, and repacking use half of the CPU cores available to the process through its CPU-affinity mask, with a minimum of one worker.
 
@@ -254,7 +270,7 @@ Managed mode rebuilds the USB layout and normalizes upstream boot entries for th
 
 Legacy single-OS plans can still carry encrypted persistence for Debian and Kali live media when the inspected live initrd and package set show the required cryptsetup support. In that compatibility path, the writer creates a LUKS container, formats the mapped device as ext4 with the `persistence` label, writes `persistence.conf`, and carries the matching live-boot kernel parameters into the managed menu.
 
-For Debian media, the Create flow now asks for one explicit source role:
+For Debian and Kali media, the Create flow asks for one explicit source role:
 
 - `Live ISO` accepts one opaque Debian Live ISO and ignores installer entries present in hybrid Live media.
 - `Netinst (hd-media)` accepts only a prepared source directory with separate downloaded `hd-media/vmlinuz`, `hd-media/initrd.gz`, and exactly one `payload/*.iso`; a bare Netinst ISO is rejected.
@@ -268,17 +284,19 @@ Repository initrd content is separated by operating-system family and boot role:
 
 ```text
 initrd/
-|-- debian/{live,netinst,netboot}/
-|-- kali/{live,netinst,netboot}/
+|-- debian/live/                         (unchanged)
+|-- debian/{netinst,netboot}/{desktop,server}/
+|-- kali/live/                           (unchanged)
+|-- kali/{netinst,netboot}/{desktop,server}/
 |-- ubuntu/{live,netinst,netboot}/
 `-- tails/{live,netinst,netboot}/
 ```
 
-For Debian Live, `initrd/debian/live` is required and applied automatically to every Live initrd referenced by the selected ISO. For Debian/Kali Netinst and Netboot plus non-Debian Live profiles, the Create flow continues to ask `Include the contents of initrd/<family>/<stage> at the root ...?` independently for each selected source. Opting in passes every entry below that one directory through `cpio` at `/` in only the matching initrd. Those generic optional stage overlays have no required filenames, required assignments, fixed entry list, or allowed filesystem-object-kind schema. Netinst and Netboot rebuild their separately downloaded/copied `hd-media/initrd.gz` or `netboot/initrd.gz`; the opaque Netinst ISO and any initrd inside it are never unpacked or modified by the overlay flow. Live remastering changes only initrd members referenced by Live boot entries and excludes installer initrds found in hybrid media. The USB preparation pipeline now generates final initrds once per referenced ABI after all package and overlay changes. The separate legacy overlay-only helper retains its byte-preserving handling of leading early cpio segments and detected archive compression; that guarantee is not a claim that freshly generated initrds are byte-identical to upstream images. When a rebuild runs through `sudo`, the complete temporary ISO is assigned to the invoking `SUDO_UID:SUDO_GID` with mode `0600` before its atomic rename, and the repository-managed rebuild directory chain is restored to setgid mode `2770`; the following non-root inspection can therefore open the published ISO while failed builds still preserve any previous valid output. Privileged Netinst and Netboot source preparation likewise hands the completed bundle tree to `SUDO_UID:SUDO_GID` and restores only the managed `sources` ancestor chain to group-traversable setgid mode `2770`; caller-supplied output parents are not changed. There is no separate interactive preseed-embedding prompt. To include `/preseed.cfg`, place a file named `preseed.cfg` directly in the selected `initrd/<family>/<stage>` directory and opt into that stage overlay. No preseed template is copied or enabled automatically. Existing saved plans with an explicit `initrd_preseed_path` and the corresponding noninteractive helper option remain supported for compatibility; new interactive source selections leave that field empty.
+For Debian/Kali Live, `initrd/debian/live` or `initrd/kali/live` is required and applied automatically to every referenced Live initrd. Tails must remain stock and is never offered an overlay. For other eligible Live profiles, the Create flow asks `Include the contents of initrd/<family>/<stage> at the root ...?` independently for each selected source. Opting in passes every entry below that one directory through `cpio` at `/` in only the matching initrd. Those generic optional stage overlays have no required filenames, required assignments, fixed entry list, or allowed filesystem-object-kind schema. Debian/Kali Netinst and Netboot apply `desktop/` and `server/` separately to two copies of the same downloaded kernel/initrd. The stage root must contain only those profile directories, not a shared `preseed.cfg` or codebase. The opaque Netinst ISO and any initrd inside it are never unpacked or modified by this overlay flow. Live remastering changes only initrd members referenced by Live boot entries and excludes installer initrds found in hybrid media. The USB preparation pipeline now generates final initrds once per referenced ABI after all package and overlay changes. The separate legacy overlay-only helper retains its byte-preserving handling of leading early cpio segments and detected archive compression; that guarantee is not a claim that freshly generated initrds are byte-identical to upstream images. When a rebuild runs through `sudo`, the complete temporary ISO is assigned to the invoking `SUDO_UID:SUDO_GID` with mode `0600` before its atomic rename, and the repository-managed rebuild directory chain is restored to setgid mode `2770`; the following non-root inspection can therefore open the published ISO while failed builds still preserve any previous valid output. Privileged Netinst and Netboot source preparation likewise hands the completed bundle tree to `SUDO_UID:SUDO_GID` and restores only the managed `sources` ancestor chain to group-traversable setgid mode `2770`; caller-supplied output parents are not changed. There is no separate interactive preseed-embedding prompt. For Debian/Kali installers, place `preseed.cfg` and its companion codebase inside `initrd/<family>/<netinst-or-netboot>/<desktop-or-server>/` and opt into the stage overlay. Each selected profile directory is merged at `/` in its own initrd; its name is not embedded as another directory. No preseed template is copied or enabled automatically. Existing saved plans with an explicit `initrd_preseed_path` and the corresponding noninteractive helper option remain supported for compatibility and apply only to Desktop in split installer roles; new interactive source selections leave that field empty.
 
 During package installation, initramfs updates are deferred without removing Debian Live's package-owned `live-tools` diversion. The executable behind the `update-initramfs` symlink is temporarily diverted and replaced with a no-op; upgrades of both `initramfs-tools` and `live-tools` retain their normal ownership routing. Standard merged-`/usr` aliases are protected too. The latest package-installed executable is restored before the final `mkinitramfs` pass, including when installation raises an error. Unknown diversions and unexpected wrapper targets are refused rather than overwritten. See `docs/BUILD-REPAIR-2026-09-06.md` for the failure analysis and validation record.
 
-Debian Netinst managed values remain in `initrd/debian/netinst/preseed.env`, where its Wi-Fi credential remains `PRESEED_WIFI_PASSPHRASE`. Debian Live uses the separate `LIVE_WIFI_PASSPHRASE` assignment in `initrd/debian/live/live.env`. `./secrets.sh --set` prompts separately for both values and writes each only to its matching active file; it never copies the Netinst credential into Live or the Live credential into Netinst. The retired `DEFAULT_LIVE_WIFI_PSK` config field is removed rather than rendered or prompted. Before committing or pushing, run `./secrets.sh --clear` to sanitize active files plus optional examples and backups that are present. Missing initrd env files, examples, backups, and individual assignments are not errors, and missing managed assignments are upserted in active files that are present. Migrated legacy names and every Live Wi-Fi name are rejected in all GRUB kernel-argument config fields.
+Debian Netinst Desktop managed values now live in `initrd/debian/netinst/desktop/preseed.env`, where its Wi-Fi credential remains `PRESEED_WIFI_PASSPHRASE`. Debian and Kali Live use `LIVE_WIFI_PASSPHRASE` in their own `initrd/<family>/live/live.env`. `./secrets.sh --set` prompts separately for installer and Live values. Installer assignments are applied to present `preseed.env` files in the Debian/Kali Desktop/Server stage directories; Live assignments apply to existing Debian and Kali Live files; edit each file separately when their Wi-Fi credentials differ; it never copies the Netinst credential into Live or the Live credential into Netinst. The retired `DEFAULT_LIVE_WIFI_PSK` config field is removed rather than rendered or prompted. Before committing or pushing, run `./secrets.sh --clear` to sanitize active files plus optional examples and backups that are present. Missing initrd env files, examples, backups, and individual assignments are not errors, and missing managed assignments are upserted in active files that are present. Migrated legacy names and every Live Wi-Fi name are rejected in all GRUB kernel-argument config fields.
 
 | Former GRUB argument | Initrd environment field |
 | --- | --- |
@@ -297,9 +315,15 @@ Debian Netinst managed values remain in `initrd/debian/netinst/preseed.env`, whe
 | `obs_username` | `PRESEED_OBS_USERNAME` |
 | `obs_password` | `PRESEED_OBS_PASSWORD` |
 
-When explicit installer entries exist, the managed menu carries the configured installer defaults. Each preseed-capable GRUB entry receives exactly one transport argument: `url=` for HTTP/internal-public URL variants or `file=` for USB-local variants. Legacy `preseed/url=`, `preseed/file=`, `url/preseed=`, and `file/preseed=` tokens from upstream entries or configured extras are removed before the canonical argument is applied. `DEBIAN_PRESEED_INTERNAL_ARGS` is merged only into Preseed Internal entries, and `DEBIAN_PRESEED_PUBLIC_ARGS` is merged only into Preseed Public entries; either value may be empty. The shipped `DEBIAN_PRESEED_PUBLIC_ARGS` value is empty. If an operator explicitly sets `debian-installer/allow_unauthenticated_ssl=true`, d-i's GNU Wget may retrieve an HTTPS preseed without validating its certificate; the separate public `url=https://...` argument remains the single web-preseed locator. Leave the overlay empty when normal CA validation is required. Debian/Kali custom menus render deterministic HTTP and USB preseed entries for Netinst and Netboot sources, plus supported installer-only profiles such as Kali Purple. USB-local preseed entries use `/hd-media/preseed/<os>/preseed.cfg`; at write time, the writer copies `/data/cfg/preseed/debian` and `/data/cfg/preseed/kali` to `/preseed/<os>` on the managed data filesystem when those folders exist, and warns when they are missing.
+### Desktop and Server installer menus
 
-In Multi-OS mode, Debian Live, Debian Netinst, Debian Netboot, Kali Live, Kali Netinst, and Kali Netboot are independent toggles. Selecting both Live and Netinst asks for two different inputs and creates two isolated roles: the Live submenu contains only loopback Live entries, while the Netinst submenu contains only entries that direct-load the separately downloaded hd-media kernel/initrd and reference that profile's one opaque Netinst ISO. Debian/Kali preseed entries are generated deterministically rather than through a second preseed-selection prompt.
+Debian and Kali Netinst/Netboot custom menus now select **DESKTOP** or **SERVER** before selecting **HTTPS WEB**, **HTTP LAN**, **INITRD PRESEED**, or **USB HD-MEDIA**. Each flavor has its own presets, endpoints, embedded initrd overlay, and separate data-partition boot directory. INITRD entries have no `url=` or `file=` argument. HTTP/HTTPS and USB entries suppress automatic loading of an embedded root preseed so the selected transport takes precedence.
+
+USB HD-MEDIA content is copied only after an explicit per-profile Yes answer and source selection. Choosing No leaves the menu and its configured future-ready path intact. The whole parent folder of `preseed.cfg`, including hidden files, is copied to `/debian-preseed-de`, `/debian-preseed-srv`, `/kali-preseed-de`, or `/kali-preseed-srv` on partition 2. Those paths are seen by the installer below `/hd-media/`; do not create an extra `hd-media` directory on the USB.
+
+In Multi-OS mode, Debian Live, Debian Netinst, Debian Netboot, Kali Live, Kali Netinst, and Kali Netboot remain independent toggles. Live behavior is unchanged. Netinst and Netboot for the same distro share each flavor's HD-MEDIA folder but have separate boot-asset folders. Kali Purple retains its existing installer-only menu behavior.
+
+See [Installer profiles](docs/installer-profiles.md) for the complete menu, configuration naming, source/USB layout, CLI examples, and migration requirements.
 
 ## Rebuild Installer ISO
 
@@ -408,7 +432,7 @@ If you build a managed Ubuntu live USB, the app does not hardcode a release-spec
 - The managed renderer now consumes the shared live base kernel arguments plus the selected policy block directly from `configs/debian-usb.conf`, and it merges them into preserved live entries as part of the managed rebuild flow so the config file, the interactive preview, and the written GRUB menu stay aligned.
 - Installer policy is stored separately. The shipped installer policies are `preserve` and `installer-preseed`.
 - When a per-profile `<PROFILE>_PRESEED_URL` value is set, installer-capable entries receive one `url=` argument. USB-local entries receive one `file=` argument instead; a Preseed Public variant uses its configured public `url=` in place of the local file transport.
-- `DEBIAN_PRESEED_INTERNAL_ARGS` and `DEBIAN_PRESEED_PUBLIC_ARGS` add optional variant-specific GRUB arguments after common/preset arguments. The public default is `debian-installer/allow_unauthenticated_ssl=true`, which makes d-i use GNU Wget with `--no-check-certificate` for HTTPS and therefore disables certificate verification; setting either key to an empty string disables that overlay without removing the submenu.
+- `DEBIAN_DE_PRESEED_INTERNAL_ARGS` and `DEBIAN_DE_PRESEED_PUBLIC_ARGS` add optional variant-specific GRUB arguments after common/preset arguments. The public default is `debian-installer/allow_unauthenticated_ssl=true`, which makes d-i use GNU Wget with `--no-check-certificate` for HTTPS and therefore disables certificate verification; setting either key to an empty string disables that overlay without removing the submenu.
 - Encrypted persistence uses LUKS for Debian and Kali live media. Ubuntu profiles currently expose standard persistence only.
 
 ## Persistence note
@@ -468,13 +492,13 @@ make install
 
 Run that as a normal user. `sudo make install` is intentionally blocked; the workflow escalates only for the host writes that actually need `sudo`.
 
-Install the repository-managed pre-commit and pre-push secret-clearing hooks into this checkout with:
+`make install` also installs the repository-managed pre-commit and pre-push secret-clearing hooks. To install only the hooks into this checkout, run:
 
 ```sh
 make install-git-hooks
 ```
 
-Git does not version files below `.git/hooks`, so `.githooks/pre-commit` and `.githooks/pre-push` are the tracked sources and `scripts/install-git-hooks.sh` copies both into the hooks directory resolved by Git. The installer validates both targets before writing either one, refuses symlinks, and refuses to overwrite unrelated hooks.
+Git does not version files below `.git/hooks`, so `.githooks/pre-commit` and `.githooks/pre-push` are the tracked sources and `scripts/install-git-hooks.sh` copies both into the hooks directory resolved by Git. The installer validates both targets before writing either one, refuses symlinks, and refuses to overwrite unrelated hooks. `make nuke` removes only these managed installed hooks; tracked `.githooks/` sources, unrelated hooks, and user replacements are preserved. Direct removal is available through `sh scripts/install-git-hooks.sh --remove`.
 
 Before every commit and push, the matching hook runs `./secrets.sh --clear-initrd --index`. It recursively inspects regular `.env`, `.env.*`, `.conf`, and `.conf.*` files below `initrd/`, clears non-empty assignments whose keys identify credentials (including passwords, passphrases, tokens, usernames, chat IDs, credentials, authentication values, and generic credential keys while exempting recognized public/GPG key metadata), and leaves unrelated assignments unchanged. Output lists only the affected worktree or index path and key name; secret values are never printed. The pre-commit index rewrite preserves other staged content independently from unrelated unstaged edits.
 
@@ -495,6 +519,36 @@ Remove installed files and managed state/log directories. The runtime download r
 ```sh
 make nuke
 ```
+
+## Installer device-node build repair
+
+The corrected Desktop/Server builder copies each **source initrd archive** into
+its staged output and extracts it independently with cpio. It never uses
+`shutil.copytree()` on an extracted initrd. This preserves device nodes such as
+`dev/console` and `dev/null`, FIFOs, internal hard links, symlinks, permissions,
+compression, and leading early-cpio segments. The source archive is unchanged.
+Desktop and Server outputs are published together only after both succeed.
+
+After upgrading from a release that fails at `.profile-build-*/clean/dev/*`,
+prepare the affected managed source again from the original downloaded kernel,
+initrd and (for netinst) matching ISO. Do not reuse the incomplete source bundle,
+delete device nodes, relax their permissions, or run `sudo make` to work around
+that error. Start the application as your normal user; it invokes its privileged
+helper when real initrd extraction needs root/device-node creation capability.
+
+The focused regression target does not require Go or any ISO download:
+
+```sh
+# Needed only when the host's test prerequisites are not installed yet:
+sudo apt-get install fakeroot cpio findutils gzip xz-utils bzip2
+make check-installer-archives
+```
+
+`fakeroot` is a **test-only metadata emulator**, not a substitute for the real
+privileged installer preparation. These tests use generated cpio archives,
+including character/block device headers, and never touch a host disk. Full
+validation qualifications and upgrade notes are in
+`docs/INITRD-DEVICE-REPAIR-2026-09-08.md`.
 
 ## Development
 

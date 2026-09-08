@@ -74,11 +74,39 @@ var (
 		"netcfg/wireless_wpa":           {},
 	}
 	legacyKeyAliases = map[string]string{
+		"PRESEED_USB_DEBIAN_FILE":         "PRESEED_USB_DEBIAN_DE_FILE",
+		"PRESEED_USB_KALI_FILE":           "PRESEED_USB_KALI_DE_FILE",
+		"PRESEED_HOST_DEBIAN_PATH":        "PRESEED_HOST_DEBIAN_DE_PATH",
+		"PRESEED_HOST_KALI_PATH":          "PRESEED_HOST_KALI_DE_PATH",
+		"DEBIAN_PRESEED_INTERNAL_URL":     "DEBIAN_DE_PRESEED_INTERNAL_URL",
+		"DEBIAN_PRESEED_PUBLIC_URL":       "DEBIAN_DE_PRESEED_PUBLIC_URL",
+		"DEBIAN_PRESEED_INTERNAL_ARGS":    "DEBIAN_DE_PRESEED_INTERNAL_ARGS",
+		"DEBIAN_PRESEED_PUBLIC_ARGS":      "DEBIAN_DE_PRESEED_PUBLIC_ARGS",
+		"KALI_LINUX_PRESEED_INTERNAL_URL": "KALI_LINUX_DE_PRESEED_INTERNAL_URL",
+		"PRESEED_ONE_ARGS_DEBIAN":         "PRESEED_ONE_ARGS_DEBIAN_DE",
+		"PRESEED_TWO_ARGS_DEBIAN":         "PRESEED_TWO_ARGS_DEBIAN_DE",
+		"PRESEED_THREE_ARGS_DEBIAN":       "PRESEED_THREE_ARGS_DEBIAN_DE",
+		"PRESEED_FOUR_ARGS_DEBIAN":        "PRESEED_FOUR_ARGS_DEBIAN_DE",
+		"PRESEED_FIVE_ARGS_DEBIAN":        "PRESEED_FIVE_ARGS_DEBIAN_DE",
+		"PRESEED_SIX_ARGS_DEBIAN":         "PRESEED_ONE_ARGS_DEBIAN_SRV",
+		"PRESEED_SEVEN_ARGS_DEBIAN":       "PRESEED_TWO_ARGS_DEBIAN_SRV",
+		"PRESEED_EIGHT_ARGS_DEBIAN":       "PRESEED_THREE_ARGS_DEBIAN_SRV",
+		"PRESEED_NINE_ARGS_DEBIAN":        "PRESEED_FOUR_ARGS_DEBIAN_SRV",
+		"PRESEED_ONE_ARGS_KALI":           "PRESEED_ONE_ARGS_KALI_DE",
+		"PRESEED_TWO_ARGS_KALI":           "PRESEED_TWO_ARGS_KALI_DE",
+		"PRESEED_THREE_ARGS_KALI":         "PRESEED_THREE_ARGS_KALI_DE",
+		"PRESEED_FOUR_ARGS_KALI":          "PRESEED_FOUR_ARGS_KALI_DE",
+		"PRESEED_FIVE_ARGS_KALI":          "PRESEED_FIVE_ARGS_KALI_DE",
+		"PRESEED_SIX_ARGS_KALI":           "PRESEED_ONE_ARGS_KALI_SRV",
+		"PRESEED_SEVEN_ARGS_KALI":         "PRESEED_TWO_ARGS_KALI_SRV",
+		"PRESEED_EIGHT_ARGS_KALI":         "PRESEED_THREE_ARGS_KALI_SRV",
+		"PRESEED_NINE_ARGS_KALI":          "PRESEED_FOUR_ARGS_KALI_SRV",
+
 		"KALI_LIVE_KERNEL_EXTRAS":      "KALI_LINUX_LIVE_KERNEL_EXTRAS",
 		"KALI_INSTALLER_KERNEL_EXTRAS": "KALI_LINUX_INSTALLER_KERNEL_EXTRAS",
-		"DEBIAN_PRESEED_URL":           "DEBIAN_PRESEED_INTERNAL_URL",
-		"KALI_PRESEED_URL":             "KALI_LINUX_PRESEED_INTERNAL_URL",
-		"KALI_LINUX_PRESEED_URL":       "KALI_LINUX_PRESEED_INTERNAL_URL",
+		"DEBIAN_PRESEED_URL":           "DEBIAN_DE_PRESEED_INTERNAL_URL",
+		"KALI_PRESEED_URL":             "KALI_LINUX_DE_PRESEED_INTERNAL_URL",
+		"KALI_LINUX_PRESEED_URL":       "KALI_LINUX_DE_PRESEED_INTERNAL_URL",
 		"KALI_PURPLE_PRESEED_URL":      "KALI_PURPLE_PRESEED_INTERNAL_URL",
 	}
 )
@@ -269,17 +297,26 @@ func normalizeConfigMap(raw map[string]string) (map[string]string, error) {
 		}
 		normalized[key] = value
 	}
-	publicPreseedURL, err := normalizeOptionalURLString(normalized["DEBIAN_PRESEED_PUBLIC_URL"])
+	publicPreseedURL, err := normalizeOptionalURLString(normalized["DEBIAN_DE_PRESEED_PUBLIC_URL"])
 	if err != nil {
 		return nil, err
 	}
-	normalized["DEBIAN_PRESEED_PUBLIC_URL"] = publicPreseedURL
+	normalized["DEBIAN_DE_PRESEED_PUBLIC_URL"] = publicPreseedURL
 	for _, key := range managedSourceURLKeys() {
 		value, err := normalizeOptionalURLString(normalized[key])
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", key, err)
 		}
 		normalized[key] = value
+	}
+	for key, rawValue := range normalized {
+		if strings.Contains(key, "_PRESEED_") && strings.HasSuffix(key, "_URL") {
+			value, err := normalizeOptionalURLString(rawValue)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", key, err)
+			}
+			normalized[key] = value
+		}
 	}
 	return normalized, nil
 }
@@ -302,9 +339,9 @@ func runtimeConfigFromMap(path string, data map[string]string) RuntimeConfig {
 		DefaultLiveToram:              data["DEFAULT_LIVE_TORAM"] == "1",
 		DefaultLiveHooks:              data["DEFAULT_LIVE_HOOKS"] == "1",
 		DefaultLiveArgsHooks:          data["DEFAULT_LIVE_ARGS_HOOKS"],
-		DefaultPreseedPublicURL:       data["DEBIAN_PRESEED_PUBLIC_URL"],
-		DefaultPreseedPublicArgs:      data["DEBIAN_PRESEED_PUBLIC_ARGS"],
-		DefaultPreseedInternalArgs:    data["DEBIAN_PRESEED_INTERNAL_ARGS"],
+		DefaultPreseedPublicURL:       data["DEBIAN_DE_PRESEED_PUBLIC_URL"],
+		DefaultPreseedPublicArgs:      data["DEBIAN_DE_PRESEED_PUBLIC_ARGS"],
+		DefaultPreseedInternalArgs:    data["DEBIAN_DE_PRESEED_INTERNAL_ARGS"],
 		DefaultPartitionLabels:        partitionLabelValuesFromMap(data),
 		ProfileFallbackLiveKernelArgs: make(map[string]string, len(profileOrder)),
 		ProfileLiveKernelExtras:       make(map[string]string, len(profileOrder)),
@@ -343,9 +380,9 @@ func configMapFromRuntimeConfig(cfg RuntimeConfig) map[string]string {
 	data["DEFAULT_LIVE_MEM_GIB"] = strconv.Itoa(cfg.DefaultLiveMemGiB)
 	data["DEFAULT_LIVE_HOOKS"] = boolFlag(cfg.DefaultLiveHooks)
 	data["DEFAULT_LIVE_ARGS_HOOKS"] = collapseWhitespace(cfg.DefaultLiveArgsHooks)
-	data["DEBIAN_PRESEED_PUBLIC_URL"] = strings.TrimSpace(cfg.DefaultPreseedPublicURL)
-	data["DEBIAN_PRESEED_PUBLIC_ARGS"] = collapseWhitespace(cfg.DefaultPreseedPublicArgs)
-	data["DEBIAN_PRESEED_INTERNAL_ARGS"] = collapseWhitespace(cfg.DefaultPreseedInternalArgs)
+	data["DEBIAN_DE_PRESEED_PUBLIC_URL"] = strings.TrimSpace(cfg.DefaultPreseedPublicURL)
+	data["DEBIAN_DE_PRESEED_PUBLIC_ARGS"] = collapseWhitespace(cfg.DefaultPreseedPublicArgs)
+	data["DEBIAN_DE_PRESEED_INTERNAL_ARGS"] = collapseWhitespace(cfg.DefaultPreseedInternalArgs)
 	for _, key := range partitionLabelConfigKeys {
 		data[key] = partitionLabelValue(cfg, key)
 	}
@@ -399,7 +436,7 @@ func runtimeConfigSections() []configSection {
 			Title: "Multi-OS and shared labels",
 			Comments: []string{
 				"These labels are used by both single-OS and Multi-OS flows where applicable.",
-				"In the shared ISO-store Multi-OS flow, only DEFAULT_ESP_LABEL, DEFAULT_MULTI_DATA_LABEL, and the Debian/Kali/Tails persistence labels are used.",
+				"In the shared ISO-store Multi-OS flow, only DEFAULT_ESP_LABEL, DEFAULT_MULTI_DATA_LABEL, and the Debian/Kali persistence labels (the Tails label is legacy and unused) are used.",
 				"DEFAULT_ESP_LABEL must fit the FAT volume-label limit; other labels must fit ext4 and GPT label use.",
 			},
 			Keys: multiOSPartitionLabelConfigKeys,
@@ -416,9 +453,9 @@ func runtimeConfigSections() []configSection {
 		{
 			Title: "Live config hooks",
 			Comments: []string{
-				"Debian Live always receives the APT repair and Wi-Fi hooks plus live-config.hooks=medium.",
+				"Debian and Kali Live receive Wi-Fi hooks plus live-config.hooks=medium; APT repair is Debian-only.",
 				"DEFAULT_LIVE_HOOKS controls only optional additional hook arguments.",
-				"Every Wi-Fi value is read from initrd/debian/live/live.env and never appended to kernel arguments.",
+				"Wi-Fi values come from initrd/debian/live/live.env or initrd/kali/live/live.env, never kernel arguments.",
 			},
 			Keys: []string{
 				"DEFAULT_LIVE_HOOKS",
@@ -491,15 +528,15 @@ func runtimeConfigSections() []configSection {
 			Comments: []string{
 				"Debian and Kali installer-capable entries use the internal profile URL by default.",
 				"The shared public URL is used by custom GRUB Preseed Public submenus as the single url= transport.",
-				"DEBIAN_PRESEED_INTERNAL_ARGS and DEBIAN_PRESEED_PUBLIC_ARGS are optional GRUB overlays applied only to their matching submenu variants.",
+				"DEBIAN_DE_PRESEED_INTERNAL_ARGS and DEBIAN_DE_PRESEED_PUBLIC_ARGS are optional GRUB overlays applied only to their matching submenu variants.",
 				"The shipped public overlay disables d-i HTTPS certificate validation; clear it to require normal CA validation.",
 			},
 			Keys: append(
-				[]string{"DEBIAN_PRESEED_PUBLIC_URL"},
+				[]string{"DEBIAN_DE_PRESEED_PUBLIC_URL"},
 				append(
 					profileConfigKeys(preseedURLProfiles, "PRESEED_INTERNAL_URL"),
-					"DEBIAN_PRESEED_PUBLIC_ARGS",
-					"DEBIAN_PRESEED_INTERNAL_ARGS",
+					"DEBIAN_DE_PRESEED_PUBLIC_ARGS",
+					"DEBIAN_DE_PRESEED_INTERNAL_ARGS",
 				)...,
 			),
 		},
@@ -540,8 +577,8 @@ func requiredConfigKeys() []string {
 	keys = append(keys, profileConfigKeys(liveOverrideProfiles, "LIVE_KERNEL_EXTRAS")...)
 	keys = append(keys, profileConfigKeys(forensicsOverrideProfiles, "FORENSICS_KERNEL_EXTRAS")...)
 	keys = append(keys, profileConfigKeys(installerOverrideProfiles, "INSTALLER_KERNEL_EXTRAS")...)
-	keys = append(keys, "DEBIAN_PRESEED_PUBLIC_URL")
-	keys = append(keys, "DEBIAN_PRESEED_PUBLIC_ARGS", "DEBIAN_PRESEED_INTERNAL_ARGS")
+	keys = append(keys, "DEBIAN_DE_PRESEED_PUBLIC_URL")
+	keys = append(keys, "DEBIAN_DE_PRESEED_PUBLIC_ARGS", "DEBIAN_DE_PRESEED_INTERNAL_ARGS")
 	keys = append(keys, profileConfigKeys(preseedURLProfiles, "PRESEED_INTERNAL_URL")...)
 	keys = append(keys, managedSourceURLKeys()...)
 	return keys
@@ -558,8 +595,8 @@ func optionalEmptyKeys() map[string]bool {
 		"DEFAULT_INSTALLER_KERNEL_EXTRAS":       true,
 		"DEFAULT_FORENSICS_KERNEL_EXTRAS":       true,
 		"DEFAULT_LIVE_ARGS_HOOKS":               true,
-		"DEBIAN_PRESEED_PUBLIC_ARGS":            true,
-		"DEBIAN_PRESEED_INTERNAL_ARGS":          true,
+		"DEBIAN_DE_PRESEED_PUBLIC_ARGS":         true,
+		"DEBIAN_DE_PRESEED_INTERNAL_ARGS":       true,
 	}
 	for _, key := range profileConfigKeys(fallbackLiveKernelProfiles, "FALLBACK_LIVE_KERNEL_ARGS") {
 		optional[key] = true
@@ -576,7 +613,7 @@ func optionalEmptyKeys() map[string]bool {
 	for _, key := range profileConfigKeys(preseedURLProfiles, "PRESEED_INTERNAL_URL") {
 		optional[key] = true
 	}
-	optional["DEBIAN_PRESEED_PUBLIC_URL"] = false
+	optional["DEBIAN_DE_PRESEED_PUBLIC_URL"] = false
 	for _, key := range managedSourceURLKeys() {
 		optional[key] = false
 	}
@@ -587,7 +624,7 @@ func isAdditionalKernelArgConfigKey(key string) bool {
 	if key == "PRESEED_COMMON_KERNEL_ARGS" {
 		return true
 	}
-	return strings.HasPrefix(key, "PRESEED_") && (strings.Contains(key, "_ARGS_") || strings.HasSuffix(key, "_KERNEL_ARGS"))
+	return (strings.HasPrefix(key, "PRESEED_") && (strings.Contains(key, "_ARGS_") || strings.HasSuffix(key, "_KERNEL_ARGS"))) || (strings.Contains(key, "_PRESEED_") && strings.HasSuffix(key, "_ARGS"))
 }
 
 func kernelArgKeys() []string {
@@ -601,8 +638,8 @@ func kernelArgKeys() []string {
 		"DEFAULT_LIVE_KERNEL_EXTRAS",
 		"DEFAULT_INSTALLER_KERNEL_EXTRAS",
 		"DEFAULT_FORENSICS_KERNEL_EXTRAS",
-		"DEBIAN_PRESEED_PUBLIC_ARGS",
-		"DEBIAN_PRESEED_INTERNAL_ARGS",
+		"DEBIAN_DE_PRESEED_PUBLIC_ARGS",
+		"DEBIAN_DE_PRESEED_INTERNAL_ARGS",
 	}
 	keys = append(keys, profileConfigKeys(fallbackLiveKernelProfiles, "FALLBACK_LIVE_KERNEL_ARGS")...)
 	keys = append(keys, profileConfigKeys(liveOverrideProfiles, "LIVE_KERNEL_EXTRAS")...)
@@ -654,7 +691,7 @@ func sortedExtraConfigKeys(data map[string]string) []string {
 }
 
 func isPreservedAdditionalConfigKey(key string) bool {
-	return strings.HasPrefix(key, "PRESEED_") || strings.HasSuffix(key, "_URL")
+	return strings.HasPrefix(key, "PRESEED_") || strings.HasSuffix(key, "_URL") || (strings.Contains(key, "_PRESEED_") && strings.HasSuffix(key, "_ARGS"))
 }
 
 func partitionLabelValuesFromMap(data map[string]string) map[string]string {
@@ -674,7 +711,19 @@ func applyLegacyKeyAliases(raw map[string]string) map[string]string {
 		legacyValue := strings.TrimSpace(remapped[legacyKey])
 		canonicalValue := strings.TrimSpace(remapped[canonicalKey])
 		if legacyValue != "" && canonicalValue == "" {
+			for _, family := range []string{"debian", "kali"} {
+				if legacyKey == "PRESEED_USB_"+strings.ToUpper(family)+"_FILE" && legacyValue == "/hd-media/preseed/"+family+"/preseed.cfg" {
+					legacyValue = "/hd-media/" + family + "-preseed-de/preseed.cfg"
+				}
+			}
 			remapped[canonicalKey] = legacyValue
+		}
+		delete(remapped, legacyKey)
+	}
+	// Retired host paths must never become implicit staging requests.
+	for _, family := range []string{"DEBIAN", "KALI"} {
+		for _, suffix := range []string{"DE", "SRV"} {
+			delete(remapped, "PRESEED_HOST_"+family+"_"+suffix+"_PATH")
 		}
 	}
 	return remapped
@@ -689,7 +738,11 @@ func profileConfigKeys(profiles []string, suffix string) []string {
 }
 
 func profileConfigKey(profile, suffix string) string {
-	return fmt.Sprintf("%s_%s", profileEnvPrefix(profile), suffix)
+	prefix := profileEnvPrefix(profile)
+	if suffix == "PRESEED_INTERNAL_URL" && (profile == profileDebian || profile == profileKaliLinux) {
+		prefix += "_DE"
+	}
+	return fmt.Sprintf("%s_%s", prefix, suffix)
 }
 
 func profileEnvPrefix(profile string) string {
@@ -767,7 +820,7 @@ func validateNoLegacySecretKernelArgs(value string, key string) error {
 	if len(found) > 0 {
 		sort.Strings(found)
 		return fmt.Errorf(
-			"%s contains forbidden legacy secret kernel argument(s): %s; store these values in initrd/debian/netinst/preseed.env",
+			"%s contains forbidden legacy secret kernel argument(s): %s; store these values in initrd/debian/netinst/desktop/preseed.env",
 			key,
 			strings.Join(found, ", "),
 		)

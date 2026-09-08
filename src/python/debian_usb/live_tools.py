@@ -8,7 +8,7 @@ import re
 from typing import Any
 
 
-LIVE_TOOL_PROFILE_SCHEMA_VERSION = 2
+LIVE_TOOL_PROFILE_SCHEMA_VERSION = 3
 LIVE_TOOL_PROFILE_ENV = "DEBIAN_USB_LIVE_TOOL_PROFILE"
 PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]*$")
 PROFILE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -50,7 +50,11 @@ def load_live_tool_profile(profile_path: str | Path | None = None) -> dict[str, 
         raise ValueError("Live tool profile must be a JSON object")
     schema_version = int(payload.get("schema_version") or 0)
     if schema_version != LIVE_TOOL_PROFILE_SCHEMA_VERSION:
-        raise ValueError(f"Live tool profile schema_version must be {LIVE_TOOL_PROFILE_SCHEMA_VERSION}")
+        raise ValueError(
+            f"Live tool profile schema_version must be {LIVE_TOOL_PROFILE_SCHEMA_VERSION}; "
+            "replace the legacy catalog with the shipped profile-scoped admin-tools.json "
+            "(wireless penetration-testing tools are Kali Live only)"
+        )
 
     supported_profiles = _validate_token_list(payload.get("supported_profiles"), "supported_profiles", PROFILE_RE)
     if not supported_profiles:
@@ -97,6 +101,15 @@ def load_live_tool_profile(profile_path: str | Path | None = None) -> dict[str, 
         )
         if not group_packages:
             raise ValueError(f"Live tool package group must not be empty: {group_id}")
+        group_profiles = list(supported_profiles)
+        if "profiles" in raw_group:
+            group_profiles = _validate_token_list(
+                raw_group["profiles"], f"package_groups.{group_id}.profiles", PROFILE_RE
+            )
+            if not group_profiles or any(profile not in supported_profiles for profile in group_profiles):
+                raise ValueError(f"invalid supported profiles for Live tool package group: {group_id}")
+        if group_id == "wireless_security" and group_profiles != ["kali-linux"]:
+            raise ValueError("wireless_security must be scoped to Kali Live only (profiles: ['kali-linux'])")
         package_groups[group_id] = group_packages
         package_group_options.append(
             {
@@ -104,6 +117,7 @@ def load_live_tool_profile(profile_path: str | Path | None = None) -> dict[str, 
                 "title": title,
                 "description": description,
                 "packages": group_packages,
+                "profiles": group_profiles,
             }
         )
         for package in group_packages:
@@ -125,6 +139,32 @@ def load_live_tool_profile(profile_path: str | Path | None = None) -> dict[str, 
             raise ValueError(f"Live tool command {command} references a package outside package_groups: {package}")
         command_packages[command] = package
 
+    additions = payload.get("profile_additions", {})
+    optional_packages = payload.get("optional_packages", {})
+    if not isinstance(additions, dict) or not isinstance(optional_packages, dict):
+        raise ValueError("profile_additions and optional_packages must be objects")
+    scopes = {option["id"]: option["profiles"] for option in package_group_options}
+    for profile, groups in additions.items():
+        if profile not in supported_profiles or not isinstance(groups, dict):
+            raise ValueError("invalid profile_additions profile: " + profile)
+        for group, extra in groups.items():
+            if group not in package_groups:
+                raise ValueError("unknown profile_additions group: " + group)
+            if profile not in scopes[group]:
+                raise ValueError(f"profile_additions group {group} is not available for profile: {profile}")
+            groups[group] = _validate_token_list(extra, "profile_additions", PACKAGE_RE)
+    for profile, optional in optional_packages.items():
+        if profile not in supported_profiles:
+            raise ValueError("unknown optional_packages profile: " + profile)
+        optional_packages[profile] = _validate_token_list(optional, "optional_packages", PACKAGE_RE)
+        available_packages = {
+            package
+            for group_id, group_packages in package_groups.items()
+            if profile in scopes[group_id]
+            for package in [*group_packages, *additions.get(profile, {}).get(group_id, [])]
+        }
+        if any(package not in available_packages for package in optional_packages[profile]):
+            raise ValueError(f"optional_packages references a package unavailable for profile: {profile}")
     notes = _validate_string_list(payload.get("notes"), "notes", optional=True)
     return {
         "schema_version": schema_version,
@@ -139,6 +179,8 @@ def load_live_tool_profile(profile_path: str | Path | None = None) -> dict[str, 
         "packages": packages,
         "command_packages": command_packages,
         "notes": notes,
+        "profile_additions": additions,
+        "optional_packages": optional_packages,
     }
 
 
@@ -151,7 +193,7 @@ def live_tool_packages_for_profile(
     live_tool_profile = load_live_tool_profile(profile_path)
     if normalized_profile not in live_tool_profile["supported_profiles"]:
         raise ValueError(f"Live administration tool remaster is not supported for profile: {normalized_profile}")
-    return _packages_for_selected_groups(live_tool_profile, selected_groups)
+    return _packages_for_selected_groups(live_tool_profile, selected_groups, normalized_profile)
 
 
 def live_tool_packages_for_build_distro(
@@ -166,14 +208,49 @@ def live_tool_packages_for_build_distro(
         selected_profile = dict(live_tool_profile)
         selected_profile["selected_groups"] = []
         return [], selected_profile
-    return _packages_for_selected_groups(live_tool_profile, selected_groups)
+    return _packages_for_selected_groups(live_tool_profile, selected_groups, profile)
+
+
+def validate_live_tool_package_scope_for_build_distro(distro: str, packages: list[str]) -> None:
+    """Reject flattened old package lists that bypass scoped group selection.
+
+    Unknown user packages are not restricted; only catalogued packages belonging
+    exclusively to another profile are rejected. Shared tools such as iw,
+    rfkill, nmap and tcpdump remain available to Debian.
+    """
+    catalog = load_live_tool_profile()
+    profile = catalog["build_distros"].get(distro)
+    if not profile:
+        return
+    allowed, _ = _packages_for_selected_groups(catalog, None, profile)
+    known = set(catalog["packages"])
+    for additions in catalog["profile_additions"].values():
+        for names in additions.values():
+            known.update(names)
+    rejected = sorted(set(packages) & (known - set(allowed)))
+    if rejected:
+        raise ValueError(
+            f"Live packages unavailable for profile {profile}: {', '.join(rejected)}; "
+            "wireless penetration-testing packages are Kali Live only. "
+            "Remove these entries from the saved package lists and feature specs."
+        )
 
 
 def _packages_for_selected_groups(
     live_tool_profile: dict[str, Any],
     selected_groups: list[str] | None,
+    profile: str,
 ) -> tuple[list[str], dict[str, Any]]:
-    group_options = live_tool_profile["package_group_options"]
+    # Resolve the profile BEFORE expanding the default/All selection. A group
+    # belonging to Kali must never leak through a shared catalog or saved plan.
+    group_options = [
+        dict(option, packages=list(dict.fromkeys([
+            *option["packages"],
+            *live_tool_profile.get("profile_additions", {}).get(profile, {}).get(option["id"], []),
+        ])), profiles=list(option["profiles"]))
+        for option in live_tool_profile["package_group_options"]
+        if profile in option["profiles"]
+    ]
     available_group_ids = [str(option["id"]) for option in group_options]
     if selected_groups is None:
         normalized_groups = available_group_ids
@@ -182,20 +259,39 @@ def _packages_for_selected_groups(
         unknown_groups = [group_id for group_id in requested_groups if group_id not in live_tool_profile["package_groups"]]
         if unknown_groups:
             raise ValueError("unsupported Live tool package groups: " + ", ".join(unknown_groups))
+        unavailable_groups = [group_id for group_id in requested_groups if group_id not in available_group_ids]
+        if unavailable_groups:
+            raise ValueError(
+                f"Live tool package groups unavailable for profile {profile}: "
+                + ", ".join(unavailable_groups)
+                + "; wireless_security is Kali Live only. Remove it from this profile's saved plan."
+            )
         requested_set = set(requested_groups)
         normalized_groups = [group_id for group_id in available_group_ids if group_id in requested_set]
 
     packages: list[str] = []
     seen_packages: set[str] = set()
+    scoped_groups = {option["id"]: option["packages"] for option in group_options}
     for group_id in normalized_groups:
-        for package in live_tool_profile["package_groups"][group_id]:
+        for package in scoped_groups[group_id]:
             if package in seen_packages:
                 continue
             seen_packages.add(package)
             packages.append(package)
 
     selected_profile = dict(live_tool_profile)
+    selected_profile["profile"] = profile
+    selected_profile["package_group_options"] = group_options
+    selected_profile["package_groups"] = scoped_groups
+    selected_profile["packages"] = list(dict.fromkeys(
+        package for group_packages in scoped_groups.values() for package in group_packages
+    ))
+    selected_profile["command_packages"] = {
+        command: package for command, package in live_tool_profile["command_packages"].items()
+        if package in selected_profile["packages"]
+    }
     selected_profile["selected_groups"] = normalized_groups
+    selected_profile["optional_packages"] = [p for p in live_tool_profile.get("optional_packages", {}).get(profile, []) if p in packages]
     return packages, selected_profile
 
 

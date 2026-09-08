@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestLoadLiveToolCatalogUsesVersionTwoOrderedGroups(t *testing.T) {
+func TestLoadLiveToolCatalogUsesVersionThreeScopedGroups(t *testing.T) {
 	catalog, err := loadLiveToolCatalog()
 	if err != nil {
 		t.Fatalf("load Live tool catalog: %v", err)
@@ -63,7 +63,7 @@ func TestPromptLiveToolGroupsSupportsAll(t *testing.T) {
 	if action != menuStay {
 		t.Fatalf("expected menuStay, got %v", action)
 	}
-	if !reflect.DeepEqual(groups, catalog.allGroupIDs()) {
+	if !reflect.DeepEqual(groups, catalog.forProfile(profileDebian).allGroupIDs()) {
 		t.Fatalf("expected all groups, got %#v", groups)
 	}
 }
@@ -127,7 +127,7 @@ func TestPromptLiveToolGroupsIndividualBackReturnsToActionMenu(t *testing.T) {
 	if action != menuStay {
 		t.Fatalf("expected menuStay, got %v", action)
 	}
-	if !reflect.DeepEqual(groups, catalog.allGroupIDs()) {
+	if !reflect.DeepEqual(groups, catalog.forProfile(profileDebian).allGroupIDs()) {
 		t.Fatalf("expected All after returning to the action menu, got %#v", groups)
 	}
 }
@@ -212,5 +212,52 @@ func TestLiveHookKernelArgsStripEveryWifiTransport(t *testing.T) {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("Live Wi-Fi transport %q survived in kernel args %q", forbidden, got)
 		}
+	}
+}
+
+func TestLiveToolCatalogProfileAdditionsAreIsolated(t *testing.T) {
+	catalog, err := loadLiveToolCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kali := catalog.forProfile(profileKaliLinux)
+	debian := catalog.forProfile(profileDebian)
+	find := func(c liveToolCatalog, name string) bool {
+		for _, group := range c.PackageGroups {
+			for _, pkg := range group.Packages {
+				if pkg == name {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if !find(kali, "kali-tools-wireless") || !find(kali, "wifite") {
+		t.Fatal("Kali wireless additions are missing")
+	}
+	if find(debian, "kali-tools-wireless") || find(catalog, "kali-tools-wireless") {
+		t.Fatal("Kali-only packages contaminated common/Debian catalog")
+	}
+	if !reflect.DeepEqual(kali, kali.forProfile(profileKaliLinux)) {
+		t.Fatal("profile expansion must be idempotent")
+	}
+}
+
+func TestLiveToolCatalogRejectsUnsafeProfileAdditions(t *testing.T) {
+	catalog, err := loadLiveToolCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog.ProfileAdditions = map[string]map[string][]string{
+		profileKaliLinux: {"wireless_security": {"good;bad"}},
+	}
+	if err := validateLiveToolCatalog(catalog); err == nil {
+		t.Fatal("unsafe package accepted")
+	}
+	catalog.ProfileAdditions = map[string]map[string][]string{
+		profileKaliLinux: {"nonexistent_group": {"wifite"}},
+	}
+	if err := validateLiveToolCatalog(catalog); err == nil {
+		t.Fatal("unknown group accepted")
 	}
 }

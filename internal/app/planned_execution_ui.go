@@ -292,7 +292,9 @@ func singlePlannedExecutionEditMenuEntries(execution PlannedExecution) []menuEnt
 		{Key: "6", Label: "Set persistence mode and size", Detail: fmt.Sprintf("%s / %d GiB", blankIfEmpty(plan.PersistenceMode, "none"), plan.PersistenceSizeGiB)},
 	}
 	if plan.WriteMode == writeModeManaged {
-		if singleCreatePreseedEligible(plan.UseCustomGrubMenu, inspectionFromCreatePlan(plan)) {
+		if splitInstallerProfile(plan.Profile, plan.SourceRole) {
+			entries = append(entries, menuEntry{Key: "7", Label: "Edit Desktop/Server HD-MEDIA copy", Detail: hdMediaPreseedSummary(plan.HDMediaPreseedDirs)})
+		} else if singleCreatePreseedEligible(plan.UseCustomGrubMenu, inspectionFromCreatePlan(plan)) {
 			detail := onOffLabel(plan.Preseed)
 			if plan.Preseed && strings.TrimSpace(plan.OfflinePreseedSourceDir) != "" {
 				detail += " | offline source: " + plan.OfflinePreseedSourceDir
@@ -352,6 +354,7 @@ func (a *App) editSinglePlannedExecutionField(execution *PlannedExecution, choic
 			req.PersistenceMode = persistenceModeNone
 			req.PersistenceSizeGiB = 0
 			req.OfflinePreseedSourceDir = ""
+			req.HDMediaPreseedDirs = nil
 			req.Preseed = false
 			req.LiveToram = false
 			req.KernelArgs = ""
@@ -412,6 +415,16 @@ func (a *App) editSinglePlannedExecutionField(execution *PlannedExecution, choic
 		}
 		req.PersistenceSizeGiB = size
 	case "7":
+		if splitInstallerProfile(req.Profile, req.SourceRole) {
+			var err error
+			req.HDMediaPreseedDirs, err = a.promptHDMediaPreseedDirs(req.Profile)
+			if err != nil {
+				return false, err
+			}
+			req.OfflinePreseedSourceDir = ""
+			req.Preseed = true
+			break
+		}
 		if !singleCreatePreseedEligible(req.UseCustomGrubMenu, req.Inspection) {
 			fmt.Println("Preseed entries are only available for managed custom-GRUB Netinst payloads.")
 			return false, nil
@@ -482,6 +495,7 @@ func createRequestFromPlan(plan CreatePlan) CreateRequest {
 		PersistenceSizeGiB:          plan.PersistenceSizeGiB,
 		LiveToolGroups:              append([]string{}, plan.LiveToolGroups...),
 		OfflinePreseedSourceDir:     plan.OfflinePreseedSourceDir,
+		HDMediaPreseedDirs:          cloneHDMediaPreseedDirs(plan.HDMediaPreseedDirs),
 		MenuLabel:                   plan.MenuLabel,
 		KernelArgs:                  plan.KernelArgs,
 		KernelPath:                  plan.KernelPath,
@@ -581,6 +595,7 @@ func (a *App) editMultiOSRequestItem(request *MultiOSRequest, index int) (bool, 
 			infoRow{Label: "Persistence", Value: onOffLabel(item.Persistence)},
 			infoRow{Label: "Preseed entries", Value: mapBoolLabel(item.Preseed, "Enabled", "Disabled")},
 			infoRow{Label: "Offline preseed source", Value: displayValueOrNone(request.ProfileOfflinePreseedDirs[item.Profile])},
+			infoRow{Label: "Desktop/Server HD-MEDIA", Value: hdMediaPreseedSummary(item.HDMediaPreseedDirs)},
 		)
 		entries := []menuEntry{
 			{Key: "1", Label: "Set ISO path"},
@@ -672,6 +687,20 @@ func (a *App) editMultiOSRequestItem(request *MultiOSRequest, index int) (bool, 
 			item.PersistenceSizeGiB = size
 			return true, nil
 		case "5":
+			if splitInstallerProfile(item.Profile, item.SourceRole) {
+				selections, err := a.promptHDMediaPreseedDirs(item.Profile)
+				if err != nil {
+					return false, err
+				}
+				for other := range request.Items {
+					if request.Items[other].Profile == item.Profile && splitInstallerProfile(item.Profile, request.Items[other].SourceRole) {
+						request.Items[other].HDMediaPreseedDirs = cloneHDMediaPreseedDirs(selections)
+						request.Items[other].Preseed = true
+					}
+				}
+				delete(request.ProfileOfflinePreseedDirs, item.Profile)
+				return true, nil
+			}
 			if (item.SourceRole != multiOSSourceRoleNetinst && item.SourceRole != multiOSSourceRoleNetboot) || !item.Preseed {
 				fmt.Println("Offline preseed content applies only to Netinst or Netboot payloads with preseed entries enabled.")
 				return false, nil
@@ -686,6 +715,10 @@ func (a *App) editMultiOSRequestItem(request *MultiOSRequest, index int) (bool, 
 			}
 			return true, nil
 		case "6":
+			if splitInstallerProfile(item.Profile, item.SourceRole) {
+				fmt.Println("Desktop/Server transport menus are always available. Use option 5 to change HD-MEDIA copying.")
+				return false, nil
+			}
 			if item.SourceRole == multiOSSourceRoleNetinst || item.SourceRole == multiOSSourceRoleNetboot {
 				item.Preseed = !item.Preseed
 				if !item.Preseed {
@@ -741,6 +774,7 @@ func multiOSRequestFromPlan(plan MultiOSPlan) MultiOSRequest {
 		request.Items = append(request.Items, MultiOSRequestItem{
 			Profile:            item.Profile,
 			Preparation:        cloneSourcePreparation(item.Preparation),
+			HDMediaPreseedDirs: cloneHDMediaPreseedDirs(item.HDMediaPreseedDirs),
 			SourceRole:         blankIfEmpty(item.SourceRole, multiOSSourceRolePrimary),
 			ISOPath:            item.ISOPath,
 			Inspection:         inspectionFromMultiOSPlanItem(item),

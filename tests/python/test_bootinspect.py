@@ -148,8 +148,9 @@ label live
 
             payload = inspect_media(str(root), "tails")
 
-            self.assertTrue(payload["supports_persistence"])
-            self.assertTrue(payload["supports_encrypted_persistence"])
+            self.assertFalse(payload["supports_persistence"])
+            self.assertFalse(payload["supports_encrypted_persistence"])
+            self.assertTrue(any("unsupported by Tails" in warning for warning in payload["warnings"]))
 
 
 if __name__ == "__main__":

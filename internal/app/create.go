@@ -85,12 +85,22 @@ func (a *App) collectCreateRequest(spec profileSpec) (CreateRequest, menuAction,
 		req.UseCustomGrubMenu = true
 		req.PreserveUpstreamGrubEntries = true
 		if createPreseedEligible(spec.Key, req.SourceRole, req.UseCustomGrubMenu, inspection) {
-			printSection(
-				"Preseed",
-				infoRow{Label: "Mode", Value: "HTTP and USB preseed entries are rendered for installer-capable Debian/Kali managed sources"},
-				infoRow{Label: "USB source", Value: "The writer stages the configured PRESEED_HOST_*_PATH tree to the directory implied by PRESEED_USB_*_FILE"},
-			)
+			if splitInstallerProfile(spec.Key, req.SourceRole) {
+				printSection("Preseed",
+					infoRow{Label: "Profiles", Value: "Desktop and Server; HTTPS WEB, HTTP LAN, INITRD PRESEED, USB HD-MEDIA"},
+					infoRow{Label: "USB source", Value: "Copy each complete preseed.cfg parent directory only when explicitly selected. Menus remain available when copying is declined."})
+			} else {
+				printSection("Preseed",
+					infoRow{Label: "Mode", Value: "HTTP and USB preseed entries are rendered for installer-capable Debian/Kali managed sources"},
+					infoRow{Label: "USB source", Value: "The writer stages the configured PRESEED_HOST_*_PATH tree to the directory implied by PRESEED_USB_*_FILE"})
+			}
 			req.Preseed = true
+			if splitInstallerProfile(spec.Key, req.SourceRole) {
+				req.HDMediaPreseedDirs, err = a.promptHDMediaPreseedDirs(spec.Key)
+				if err != nil {
+					return req, menuStay, err
+				}
+			}
 		}
 		req.Persistence, req.PersistenceMode, req.PersistenceSizeGiB, req.ISOPath, req.Inspection, err = a.promptPersistenceSettings(spec.MultiOSLabel, spec, req.ISOPath, req.SourceRole, inspection)
 		if err != nil {
@@ -347,10 +357,11 @@ func (a *App) promptInitrdOverlayContent(
 	if err != nil {
 		return "", menuStay, err
 	}
-	include, err := a.promptYesNo(
-		fmt.Sprintf("Include the contents of initrd/%s/%s at the root of the %s %s initrd", family, stage, spec.MultiOSLabel, stage),
-		false,
-	)
+	prompt := fmt.Sprintf("Include the contents of initrd/%s/%s at the root of the %s %s initrd", family, stage, spec.MultiOSLabel, stage)
+	if splitInstallerProfile(spec.Key, sourceRole) {
+		prompt = fmt.Sprintf("Embed initrd/%s/%s/desktop and server into their separate installer initrds", family, stage)
+	}
+	include, err := a.promptYesNo(prompt, false)
 	if err != nil {
 		return "", menuStay, err
 	}
@@ -367,15 +378,23 @@ func (a *App) promptInitrdOverlayContent(
 
 // collectLiveInitrdOverlay records the overlay without opening or rebuilding an initrd.
 func (a *App) collectLiveInitrdOverlay(spec profileSpec, inspection ISOInspection) (string, menuAction, error) {
-	if spec.Key != profileDebian || !isLiveCapableMedia(inspection.MediaClass) {
+	if spec.Key == profileTails {
+		fmt.Println("Tails: experimental stock-ISO boot only; no remaster, custom initrd or generic persistence. Use a dedicated official Tails USB for supported security and Persistent Storage.")
+		return "", menuStay, nil
+	}
+	if (spec.Key != profileDebian && spec.Key != profileKaliLinux) || !isLiveCapableMedia(inspection.MediaClass) {
 		return a.promptInitrdOverlayContent(spec, multiOSSourceRolePrimary, inspection.MediaClass)
 	}
 	if a.backend == nil || strings.TrimSpace(a.backend.initrdRoot) == "" {
-		return "", menuStay, fmt.Errorf("Debian Live requires the managed initrd overlay root")
+		return "", menuStay, fmt.Errorf("%s Live requires the managed initrd overlay root", spec.MultiOSLabel)
 	}
-	path, err := resolveOptionalExistingDir(filepath.Join(a.backend.initrdRoot, "debian", "live"))
+	family := "debian"
+	if spec.Key == profileKaliLinux {
+		family = "kali"
+	}
+	path, err := resolveOptionalExistingDir(filepath.Join(a.backend.initrdRoot, family, "live"))
 	if err == nil && path == "" {
-		err = fmt.Errorf("required Debian Live initrd overlay is missing")
+		err = fmt.Errorf("required %s Live initrd overlay is missing", spec.MultiOSLabel)
 	}
 	return path, menuStay, err
 }
@@ -579,7 +598,7 @@ func (a *App) chooseSecureBootTrustMode() (string, menuAction, error) {
 }
 
 func (a *App) promptPersistenceSettings(label string, spec profileSpec, sourcePath, sourceRole string, inspection ISOInspection) (bool, string, int, string, ISOInspection, error) {
-	if !persistencePromptEligible(spec, inspection) {
+	if spec.Key == profileTails || !persistencePromptEligible(spec, inspection) {
 		return false, persistenceModeNone, 0, sourcePath, inspection, nil
 	}
 	enabled, err := a.promptYesNo("Create a persistence partition for "+label, false)
@@ -603,7 +622,7 @@ func remasterEncryptedPersistenceEligible(spec profileSpec, sourceRole string, i
 		return false
 	}
 	switch spec.Key {
-	case profileDebian, profileKaliLinux, profileTails:
+	case profileDebian, profileKaliLinux:
 		return spec.SupportsPersistence
 	default:
 		return false
@@ -685,29 +704,7 @@ func (a *App) choosePersistenceMode() (string, bool, error) {
 
 func (a *App) choosePersistenceModeForProfile(profile string) (string, bool, error) {
 	if profile == profileTails {
-		for {
-			printHeader("Persistence Mode")
-			printSection(
-				"Modes",
-				infoRow{Label: "Encrypted", Value: "Tails Persistent Storage uses an encrypted LUKS container"},
-			)
-			a.printMenu(
-				menuEntry{Key: "1", Label: "Encrypted (LUKS)"},
-				menuEntry{Key: "b", Label: "Back Without Persistence"},
-			)
-			choice, err := a.promptChoice("Select the persistence mode")
-			if err != nil {
-				return "", false, err
-			}
-			switch choice {
-			case "1":
-				return persistenceModeEncrypted, false, nil
-			case "b":
-				return "", true, nil
-			default:
-				fmt.Println("Invalid selection.")
-			}
-		}
+		return persistenceModeNone, true, fmt.Errorf("Tails native Persistent Storage requires an official Tails USB on a dedicated device")
 	}
 	for {
 		printHeader("Persistence Mode")

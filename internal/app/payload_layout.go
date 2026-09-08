@@ -8,9 +8,9 @@ func profileUSBPreseedFile(config RuntimeConfig, profile string) string {
 	}
 	switch strings.TrimSpace(profile) {
 	case profileDebian:
-		return strings.TrimSpace(config.ExtraValues["PRESEED_USB_DEBIAN_FILE"])
+		return strings.TrimSpace(config.ExtraValues["PRESEED_USB_DEBIAN_DE_FILE"])
 	case profileKaliLinux:
-		return strings.TrimSpace(config.ExtraValues["PRESEED_USB_KALI_FILE"])
+		return strings.TrimSpace(config.ExtraValues["PRESEED_USB_KALI_DE_FILE"])
 	case profileKaliPurple:
 		return strings.TrimSpace(config.ExtraValues["PRESEED_USB_PURPLE_FILE"])
 	default:
@@ -19,19 +19,11 @@ func profileUSBPreseedFile(config RuntimeConfig, profile string) string {
 }
 
 func profileHostPreseedPath(config RuntimeConfig, profile string) string {
-	if config.ExtraValues == nil {
-		return ""
-	}
-	switch strings.TrimSpace(profile) {
-	case profileDebian:
-		return strings.TrimSpace(config.ExtraValues["PRESEED_HOST_DEBIAN_PATH"])
-	case profileKaliLinux:
-		return strings.TrimSpace(config.ExtraValues["PRESEED_HOST_KALI_PATH"])
-	case profileKaliPurple:
+	// Debian/Kali Desktop and Server use explicit per-operation consent only.
+	if strings.TrimSpace(profile) == profileKaliPurple {
 		return strings.TrimSpace(config.ExtraValues["PRESEED_HOST_PURPLE_PATH"])
-	default:
-		return ""
 	}
+	return ""
 }
 
 func effectiveManagedPayloadLayout(config RuntimeConfig, profile, layout string, useCustomGrubMenu bool) string {

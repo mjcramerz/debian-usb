@@ -839,11 +839,9 @@ duw_load_config() {
       DEFAULT_UBUNTU_NETINST_LABEL) DEFAULT_UBUNTU_NETINST_LABEL=${_duw_value} ;;
       DEFAULT_UBUNTU_PERSIST_LABEL) DEFAULT_UBUNTU_PERSIST_LABEL=${_duw_value} ;;
       DEFAULT_UBUNTU_PERSIST_PARTLABEL) DEFAULT_UBUNTU_PERSIST_PARTLABEL=${_duw_value} ;;
-      PRESEED_USB_DEBIAN_FILE) PRESEED_USB_DEBIAN_FILE=${_duw_value} ;;
-      PRESEED_USB_KALI_FILE) PRESEED_USB_KALI_FILE=${_duw_value} ;;
+      PRESEED_USB_DEBIAN_DE_FILE) PRESEED_USB_DEBIAN_DE_FILE=${_duw_value} ;;
+      PRESEED_USB_KALI_DE_FILE) PRESEED_USB_KALI_DE_FILE=${_duw_value} ;;
       PRESEED_USB_PURPLE_FILE) PRESEED_USB_PURPLE_FILE=${_duw_value} ;;
-      PRESEED_HOST_DEBIAN_PATH) PRESEED_HOST_DEBIAN_PATH=${_duw_value} ;;
-      PRESEED_HOST_KALI_PATH) PRESEED_HOST_KALI_PATH=${_duw_value} ;;
       PRESEED_HOST_PURPLE_PATH) PRESEED_HOST_PURPLE_PATH=${_duw_value} ;;
     esac
   done <"${_duw_config_path}"
@@ -936,7 +934,7 @@ duw_effective_esp_label() (
 duw_usage() (
   cat <<'EOF'
 Usage:
-  write_usb.sh --config <path> --profile <name> --write-mode <direct|managed> --device <path> --iso <path> [--with-persistence] [--persistence-mode <plain|encrypted>] [--persistence-size-gib <int>] [--kernel-args <args>] [--kernel-path <path>] [--initrd-path <path>] [--menu-label <label>] [--esp-label <label>] [--payload-fs-label <label>] [--payload-partlabel <label>] [--persistence-fs-label <label>] [--persistence-partlabel <label>] [--use-custom-grub-menu <0|1>] [--preserve-upstream-grub-entries <0|1>] [--include-preseed <0|1>] [--offline-preseed-dir <path>] [--secure-boot-trust <mok|firmware-db>] [--update-existing <0|1>]
+  write_usb.sh --config <path> --profile <name> --write-mode <direct|managed> --device <path> --iso <path> [--with-persistence] [--persistence-mode <plain|encrypted>] [--persistence-size-gib <int>] [--kernel-args <args>] [--kernel-path <path>] [--initrd-path <path>] [--menu-label <label>] [--esp-label <label>] [--payload-fs-label <label>] [--payload-partlabel <label>] [--persistence-fs-label <label>] [--persistence-partlabel <label>] [--use-custom-grub-menu <0|1>] [--preserve-upstream-grub-entries <0|1>] [--include-preseed <0|1>] [--offline-preseed-dir <path>] [--source-role <primary|netinst|netboot>] [--hd-media-preseed-desktop <preseed.cfg-or-directory>] [--hd-media-preseed-server <preseed.cfg-or-directory>] [--secure-boot-trust <mok|firmware-db>] [--update-existing <0|1>]
   write_usb.sh --config <path> --write-mode multi-os --device <path> --multi-os-plan <path> [--update-existing <0|1>]
 EOF
 )
@@ -2128,6 +2126,7 @@ duw_configure_persistence_partition() (
   persist_part="$3"
   persist_mount="$4"
   target_device="${5:-}"
+  [ "${profile}" != tails ] || duw_die "Tails native Persistent Storage is not supported on managed/multi-OS USBs; use the official Tails USB image on a dedicated device"
   duw_step "Configuring plain persistence on ${persist_part}"
   duw_make_ext4_filesystem "${persist_part}" "${fs_label}" "${target_device}"
   if [ "${profile}" = "ubuntu-desktop" ]; then
@@ -2149,6 +2148,7 @@ duw_configure_encrypted_persistence_partition() (
   fs_label=${5:-DEBIAN-PERSIST}
   key_file=${6:-}
   target_device=${7:-}
+  [ "${profile}" != tails ] || duw_die "Tails native Persistent Storage is not supported on managed/multi-OS USBs; use the official Tails USB image on a dedicated device"
   mapper_path=/dev/mapper/${mapper_name}
   ephemeral_key_root=
   cleanup_key_file=0
@@ -3204,8 +3204,8 @@ duw_validate_preseed_usb_file() (
 
 duw_profile_preseed_usb_file() (
   case $1 in
-    debian) printf '%s\n' "${PRESEED_USB_DEBIAN_FILE:-}" ;;
-    kali-linux) printf '%s\n' "${PRESEED_USB_KALI_FILE:-}" ;;
+    debian) printf '%s\n' "${PRESEED_USB_DEBIAN_DE_FILE:-}" ;;
+    kali-linux) printf '%s\n' "${PRESEED_USB_KALI_DE_FILE:-}" ;;
     kali-purple) printf '%s\n' "${PRESEED_USB_PURPLE_FILE:-}" ;;
     *) printf '\n' ;;
   esac
@@ -3213,8 +3213,6 @@ duw_profile_preseed_usb_file() (
 
 duw_profile_preseed_host_path() (
   case $1 in
-    debian) printf '%s\n' "${PRESEED_HOST_DEBIAN_PATH:-}" ;;
-    kali-linux) printf '%s\n' "${PRESEED_HOST_KALI_PATH:-}" ;;
     kali-purple) printf '%s\n' "${PRESEED_HOST_PURPLE_PATH:-}" ;;
     *) printf '\n' ;;
   esac
@@ -3919,6 +3917,50 @@ output.write_text(json.dumps(plan, indent=2, sort_keys=True) + "\n", encoding="u
 PY
 )
 
+duw_is_split_installer() (
+  case ${1}:${2} in debian:netinst|debian:netboot|kali-linux:netinst|kali-linux:netboot) return 0 ;; *) return 1 ;; esac
+)
+
+duw_validate_installer_profile_assets() (
+  profile=$1
+  source_role=$2
+  source_path=$3
+  duw_is_split_installer "${profile}" "${source_role}" || return 0
+  helper=$(duw_python_helper_path)
+  duw_run_python_helper "${helper}" validate-installer-profiles --profile "${profile}" --source-role "${source_role}" --source-path "${source_path}" >/dev/null || duw_die "invalid Desktop/Server installer assets; prepare the source again before writing"
+)
+
+duw_single_hd_media_preseeds() (
+  profile=$1
+  source_role=$2
+  config_path=$3
+  target_root=${4:-}
+  helper=$(duw_python_helper_path)
+  duw_run_python_helper "${helper}" stage-hd-media-preseeds --config "${config_path}" --profile "${profile}" --source-role "${source_role}" --desktop "${DUSB_HD_MEDIA_DESKTOP:-}" --server "${DUSB_HD_MEDIA_SERVER:-}" --target-root "${target_root}"
+)
+
+duw_multios_hd_media_preseeds() (
+  plan_path=$1
+  config_path=$2
+  target_root=${3:-}
+  helper=$(duw_python_helper_path)
+  duw_run_python_helper "${helper}" stage-hd-media-preseeds --config "${config_path}" --plan "${plan_path}" --target-root "${target_root}"
+)
+
+duw_multios_state_has_installer_profile() (
+  state_dir=$1
+  selected_profile=$2
+  count=$(duw_multios_state_count "${state_dir}")
+  cursor=0
+  while [ "${cursor}" -lt "${count}" ]; do
+    profile=$(duw_multios_state_get "${state_dir}" "${cursor}" profile)
+    role=$(duw_multios_state_get "${state_dir}" "${cursor}" source_role)
+    if [ "${profile}" = "${selected_profile}" ] && duw_is_split_installer "${profile}" "${role}"; then return 0; fi
+    cursor=$((cursor + 1))
+  done
+  return 1
+)
+
 duw_build_single_iso_store_usb() (
   profile="$1"
   iso_path="$2"
@@ -3934,6 +3976,12 @@ duw_build_single_iso_store_usb() (
   preserve_upstream_grub_entries="${12}"
   include_preseed="${13}"
   esp_start=3
+  hd_media_mib=0
+  if duw_is_split_installer "${profile}" "${source_role}"; then
+    duw_validate_installer_profile_assets "${profile}" "${source_role}" "${iso_path}"
+    hd_media_result=$(duw_single_hd_media_preseeds "${profile}" "${source_role}" "${config_path}")
+    hd_media_mib=$(duw_bytes_to_mib "$(duw_json_field "${hd_media_result}" bytes)")
+  fi
 
   # The caller supplies independent Secure Boot state to this function subshell.
   # shellcheck disable=SC2031
@@ -3944,7 +3992,7 @@ duw_build_single_iso_store_usb() (
   esp_size_mib="$(duw_required_esp_size_mib_from_render_payload "${DUSB_MANAGED_RENDER_OUTPUT}" 0)"
   esp_end=$((esp_start + esp_size_mib))
   data_start="${esp_end}"
-  required_mib=$((iso_mib + esp_size_mib + 256))
+  required_mib=$((iso_mib + esp_size_mib + hd_media_mib + 256))
   device_bytes="$(blockdev --getsize64 "${device}")"
   device_mib="$(duw_bytes_to_mib "${device_bytes}")"
   usable_mib=$((device_mib - 8))
@@ -3971,16 +4019,30 @@ duw_build_single_iso_store_usb() (
   duw_reset_partition_table_state "${device}"
   duw_step "Partitioning ${device}"
   duw_write_gpt_label "${device}"
-  parted -s "${device}" unit MiB mkpart BIOSBOOT 1 3
-  parted -s "${device}" set 1 bios_grub on
-  parted -s "${device}" unit MiB mkpart "$(duw_effective_esp_label)" fat32 "${esp_start}" "${esp_end}"
-  parted -s "${device}" set 2 esp on
-  parted -s "${device}" unit MiB mkpart "${payload_partlabel}" ext4 "${data_start}" 100%
+  if duw_is_split_installer "${profile}" "${source_role}"; then
+    # Partition numbers, not physical order: reserve the front gap for BIOSBOOT
+    # while keeping ESP=p1 and the installer/HD-MEDIA data filesystem=p2.
+    parted -s "${device}" unit MiB mkpart "$(duw_effective_esp_label)" fat32 "${esp_start}" "${esp_end}"
+    parted -s "${device}" set 1 esp on
+    parted -s "${device}" unit MiB mkpart "${payload_partlabel}" ext4 "${data_start}" 100%
+    parted -s "${device}" unit MiB mkpart BIOSBOOT 1 3
+    parted -s "${device}" set 3 bios_grub on
+    esp_number=1
+    data_number=2
+  else
+    parted -s "${device}" unit MiB mkpart BIOSBOOT 1 3
+    parted -s "${device}" set 1 bios_grub on
+    parted -s "${device}" unit MiB mkpart "$(duw_effective_esp_label)" fat32 "${esp_start}" "${esp_end}"
+    parted -s "${device}" set 2 esp on
+    parted -s "${device}" unit MiB mkpart "${payload_partlabel}" ext4 "${data_start}" 100%
+    esp_number=2
+    data_number=3
+  fi
   partprobe "${device}" || duw_die "failed to refresh the kernel partition table for ${device}"
   duw_settle_block_state
 
-  esp_part="$(duw_wait_for_partition_device "${device}" 2)"
-  data_part="$(duw_wait_for_partition_device "${device}" 3)"
+  esp_part="$(duw_wait_for_partition_device "${device}" "${esp_number}")"
+  data_part="$(duw_wait_for_partition_device "${device}" "${data_number}")"
   duw_make_vfat_filesystem "${esp_part}" "$(duw_effective_esp_label)" "${device}"
   duw_make_ext4_filesystem "${data_part}" "${payload_fs_label}" "${device}"
   sync
@@ -3995,12 +4057,14 @@ duw_build_single_iso_store_usb() (
   duw_prepare_secure_boot_identity
   duw_stage_secure_boot_support "${esp_mount}" "${temp_root}"
   duw_note_secure_boot_requirement
-  if [ "${include_preseed}" = "1" ]; then
+  if duw_is_split_installer "${profile}" "${source_role}"; then
+    duw_single_hd_media_preseeds "${profile}" "${source_role}" "${config_path}" "${data_mount}" >/dev/null
+  elif [ "${include_preseed}" = "1" ]; then
     duw_stage_single_profile_preseed_tree "${data_mount}" "${profile}"
   fi
 
   duw_step "Rendering managed GRUB menu"
-  duw_render_managed_grub "${profile}" "${iso_path}" "${data_uuid}" "0" "" "${kernel_args}" "${menu_label}" "${kernel_override}" "${initrd_override}" "${config_path}" "${esp_uuid}" "${live_toram_override}" "${use_custom_grub_menu}" "${preserve_upstream_grub_entries}" "${include_preseed}"
+  duw_render_managed_grub "${profile}" "${iso_path}" "${data_uuid}" "0" "" "${kernel_args}" "${menu_label}" "${kernel_override}" "${initrd_override}" "${config_path}" "${esp_uuid}" "${live_toram_override}" "${use_custom_grub_menu}" "${preserve_upstream_grub_entries}" "${include_preseed}" "${source_role}"
   duw_stage_secure_boot_assets_from_render_payload "${DUSB_MANAGED_RENDER_OUTPUT}" "${temp_root}" "${esp_mount}"
   duw_stage_iso_store_from_render_payload "${DUSB_MANAGED_RENDER_OUTPUT}" "${data_mount}" "${data_mount}" "${iso_path}"
   duw_note "Rendered managed ${DUSB_MANAGED_MEDIA_CLASS} GRUB menu with ${DUSB_MANAGED_ENTRY_COUNT} entries"
@@ -4120,7 +4184,10 @@ duw_multios_stage_default_preseed_from_state() (
   set -- "${payload_mount}"
   index=0
   while [ "${index}" -lt "${item_count}" ]; do
-    set -- "$@" "$(duw_multios_state_get "${state_dir}" "${index}" profile)"
+    profile=$(duw_multios_state_get "${state_dir}" "${index}" profile)
+    if ! duw_multios_state_has_installer_profile "${state_dir}" "${profile}"; then
+      set -- "$@" "${profile}"
+    fi
     index=$((index + 1))
   done
   duw_stage_default_preseed_trees "$@"
@@ -4146,10 +4213,37 @@ duw_multios_stage_selected_preseed_from_state() (
   [ "$#" -eq 1 ] || duw_stage_multios_preseed_trees "$@"
 )
 
+# p1 = ESP, p2 = shared ISO store. Only enabled Live sources consume p3+.
+# This is the allocator used by the real destructive writer, not a preview.
+duw_multios_create_persistence_partitions() (
+  state_dir=$1
+  item_count=$2
+  device=$3
+  cursor=$4
+  partition_number=3
+  index=0
+  while [ "${index}" -lt "${item_count}" ]; do
+    persist_flag=$(duw_multios_state_get "${state_dir}" "${index}" persist_flag)
+    if [ "${persist_flag}" = 1 ]; then
+      persist_size=$(duw_multios_state_get "${state_dir}" "${index}" persist_size)
+      persist_partlabel=$(duw_multios_state_get "${state_dir}" "${index}" persist_partlabel)
+      part_end=$((cursor + persist_size * 1024))
+      parted -s "${device}" unit MiB mkpart "${persist_partlabel}" ext4 "${cursor}" "${part_end}"
+      persist_part=$(duw_partition_path "${device}" "${partition_number}")
+      duw_multios_state_set "${state_dir}" "${index}" persist_part "${persist_part}"
+      cursor=${part_end}
+      partition_number=$((partition_number + 1))
+    fi
+    index=$((index + 1))
+  done
+)
+
 duw_build_multios_iso_store_usb() (
   plan_path=$1
   device=$2
   config_path=$3
+  hd_media_result=$(duw_multios_hd_media_preseeds "${plan_path}" "${config_path}")
+  hd_media_mib=$(duw_bytes_to_mib "$(duw_json_field "${hd_media_result}" bytes)")
   esp_start=1
 
   duw_validate_multios_plan "${plan_path}"
@@ -4179,6 +4273,7 @@ duw_build_multios_iso_store_usb() (
     persist_mode=$(duw_multios_state_get "${state_dir}" "${index}" persist_mode)
     persist_size=$(duw_multios_state_get "${state_dir}" "${index}" persist_size)
     offline_preseed_dir=$(duw_multios_state_get "${state_dir}" "${index}" offline_preseed_dir)
+    duw_validate_installer_profile_assets "${profile}" "${source_role}" "${iso_path}"
 
     if [ "${source_role}" = netboot ]; then
       [ -d "${iso_path}" ] || duw_die "netboot source must be a prepared source directory: ${iso_path}"
@@ -4186,7 +4281,7 @@ duw_build_multios_iso_store_usb() (
       [ -e "${iso_path}" ] || duw_die "media source does not exist: ${iso_path}"
       duw_inspect_managed_media "${profile}" "${iso_path}" "${config_path}" "${use_custom_grub_menu}" "${source_role}"
     fi
-    [ -z "${offline_preseed_dir}" ] || duw_die "per-plan offline preseed directories are replaced by configured PRESEED_HOST_*_PATH staging"
+    [ -z "${offline_preseed_dir}" ] || duw_die "legacy per-plan offline preseed directories are unsupported; edit and resave with explicit Desktop/Server HD-MEDIA selections"
     layout=$(duw_effective_payload_layout "${profile}" "${layout}" "${config_path}" "${use_custom_grub_menu}")
     [ "${layout}" = shared-data ] || duw_die "deterministic Multi-OS USB creation requires shared-data payloads, got ${layout} for ${title}"
     duw_multios_state_set "${state_dir}" "${index}" layout "${layout}"
@@ -4225,7 +4320,7 @@ duw_build_multios_iso_store_usb() (
   esp_size_mib=$(duw_required_esp_size_mib_from_render_payload "${DUSB_MANAGED_RENDER_OUTPUT}" 0)
   esp_end=$((esp_start + esp_size_mib))
   data_start=${esp_end}
-  required_mib=$((total_iso_mib + esp_size_mib + 64 + total_persist_mib))
+  required_mib=$((total_iso_mib + esp_size_mib + hd_media_mib + 64 + total_persist_mib))
   device_bytes=$(blockdev --getsize64 "${device}")
   device_mib=$(duw_bytes_to_mib "${device_bytes}")
   usable_mib=$((device_mib - 8))
@@ -4261,23 +4356,7 @@ duw_build_multios_iso_store_usb() (
   parted -s "${device}" set 1 esp on
   if [ "${total_persist_mib}" -gt 0 ]; then
     parted -s "${device}" unit MiB mkpart "$(duw_shared_data_partlabel)" ext4 "${data_start}" "${data_end_mib}"
-    cursor=${data_end_mib}
-    partition_number=3
-    index=0
-    while [ "${index}" -lt "${item_count}" ]; do
-      persist_flag=$(duw_multios_state_get "${state_dir}" "${index}" persist_flag)
-      if [ "${persist_flag}" = 1 ]; then
-        persist_size=$(duw_multios_state_get "${state_dir}" "${index}" persist_size)
-        persist_partlabel=$(duw_multios_state_get "${state_dir}" "${index}" persist_partlabel)
-        part_end=$((cursor + persist_size * 1024))
-        parted -s "${device}" unit MiB mkpart "${persist_partlabel}" ext4 "${cursor}" "${part_end}"
-        persist_part=$(duw_partition_path "${device}" "${partition_number}")
-        duw_multios_state_set "${state_dir}" "${index}" persist_part "${persist_part}"
-        cursor=${part_end}
-        partition_number=$((partition_number + 1))
-      fi
-      index=$((index + 1))
-    done
+    duw_multios_create_persistence_partitions "${state_dir}" "${item_count}" "${device}" "${data_end_mib}"
   else
     parted -s "${device}" unit MiB mkpart "$(duw_shared_data_partlabel)" ext4 "${data_start}" 100%
   fi
@@ -4310,6 +4389,7 @@ duw_build_multios_iso_store_usb() (
   duw_stage_secure_boot_support "${esp_mount}" "${temp_root}"
   duw_note_secure_boot_requirement
   duw_multios_stage_default_preseed_from_state "${data_mount}" "${state_dir}"
+  duw_multios_hd_media_preseeds "${plan_path}" "${config_path}" "${data_mount}" >/dev/null
   duw_remove_shared_store_media_metadata "${data_mount}"
   index=0
   while [ "${index}" -lt "${item_count}" ]; do
@@ -5024,15 +5104,25 @@ duw_update_managed_usb() (
   preserve_upstream_grub_entries="${14:-0}"
   offline_preseed_source_dir="${15:-}"
   include_preseed="${16:-0}"
+  source_role="${17:-primary}"
+  if duw_is_split_installer "${profile}" "${source_role}"; then
+    duw_validate_installer_profile_assets "${profile}" "${source_role}" "${iso_path}"
+    duw_single_hd_media_preseeds "${profile}" "${source_role}" "${config_path}" >/dev/null
+    # Old single-installer sticks used p3 for data. Do not silently reinterpret
+    # an ESP as /hd-media or repartition an existing USB during an update.
+    expected_data=$(duw_partition_path "${device}" 2)
+    actual_data=$(duw_device_partition_by_label "${device}" "$(duw_profile_payload_fs_label "${profile}" "${source_role}" installer)")
+    [ "${actual_data}" = "${expected_data}" ] || duw_die "installer updates require the new partition-2 data layout; recreate this older USB"
+  fi
   payload_render_iso="${iso_path}"
 
   # The caller supplies independent Secure Boot state to this function subshell.
   # shellcheck disable=SC2031
   DUSB_SECURE_BOOT_TRUST="$(duw_effective_secure_boot_trust "${DUSB_SECURE_BOOT_TRUST:-}")"
-  duw_inspect_managed_media "${profile}" "${iso_path}" "${config_path}" "${use_custom_grub_menu}"
+  duw_inspect_managed_media "${profile}" "${iso_path}" "${config_path}" "${use_custom_grub_menu}" "${source_role}"
   payload_layout="${DUSB_MANAGED_PAYLOAD_LAYOUT}"
-  payload_fs_label="$(duw_profile_payload_fs_label "${profile}" "primary" "${DUSB_INSPECTED_MEDIA_CLASS}")"
-  payload_partlabel="$(duw_profile_payload_partlabel "${profile}" "primary" "${DUSB_INSPECTED_MEDIA_CLASS}")"
+  payload_fs_label="$(duw_profile_payload_fs_label "${profile}" "${source_role}" "${DUSB_INSPECTED_MEDIA_CLASS}")"
+  payload_partlabel="$(duw_profile_payload_partlabel "${profile}" "${source_role}" "${DUSB_INSPECTED_MEDIA_CLASS}")"
 
   duw_step "Updating managed USB assets on ${device} from ${iso_path}"
   duw_note "Target device: $(duw_device_pretty_name "${device}")"
@@ -5056,11 +5146,14 @@ duw_update_managed_usb() (
   if singleUsesSharedISOStoreLayoutPlaceholder "${payload_layout}" "${with_persistence}" "${offline_preseed_source_dir}"; then
     payload_part="$(duw_device_partition_by_label "${device}" "${payload_fs_label}")"
     duw_mount_partition "${payload_part}" "${payload_mount}" ext4
-    if [ "${include_preseed}" = "1" ]; then
+    if ! duw_is_split_installer "${profile}" "${source_role}" && [ "${include_preseed}" = "1" ]; then
       duw_stage_single_profile_preseed_tree "${payload_mount}" "${profile}" "${offline_preseed_source_dir}"
     fi
     payload_locator="$(duw_partition_uuid "${payload_part}")"
-    duw_render_managed_grub "${profile}" "${payload_render_iso}" "${payload_locator}" "${with_persistence}" "${persistence_mode}" "${kernel_args}" "${menu_label}" "${kernel_override}" "${initrd_override}" "${config_path}" "${esp_uuid}" "${live_toram_override}" "${use_custom_grub_menu}" "${preserve_upstream_grub_entries}" "${include_preseed}"
+    duw_render_managed_grub "${profile}" "${payload_render_iso}" "${payload_locator}" "${with_persistence}" "${persistence_mode}" "${kernel_args}" "${menu_label}" "${kernel_override}" "${initrd_override}" "${config_path}" "${esp_uuid}" "${live_toram_override}" "${use_custom_grub_menu}" "${preserve_upstream_grub_entries}" "${include_preseed}" "${source_role}"
+    if duw_is_split_installer "${profile}" "${source_role}"; then
+      duw_single_hd_media_preseeds "${profile}" "${source_role}" "${config_path}" "${payload_mount}" >/dev/null
+    fi
     duw_stage_secure_boot_assets_from_render_payload "${DUSB_MANAGED_RENDER_OUTPUT}" "${temp_root}" "${esp_mount}"
     duw_stage_iso_store_from_render_payload "${DUSB_MANAGED_RENDER_OUTPUT}" "${payload_mount}" "${payload_mount}" "${payload_render_iso}"
     duw_install_multiboot_grub_bootloaders "${device}" "${payload_part}" "${payload_mount}" "${esp_part}" "${esp_mount}"
@@ -5080,7 +5173,7 @@ duw_update_managed_usb() (
       fi
     fi
     payload_locator="$(duw_payload_locator_for_render "${profile}" "${DUSB_INSPECTED_MEDIA_CLASS}" "${payload_layout}" "${payload_part}")"
-    duw_render_managed_grub "${profile}" "${payload_render_iso}" "${payload_locator}" "${with_persistence}" "${persistence_mode}" "${kernel_args}" "${menu_label}" "${kernel_override}" "${initrd_override}" "${config_path}" "${esp_uuid}" "${live_toram_override}" "${use_custom_grub_menu}" "${preserve_upstream_grub_entries}" "${include_preseed}"
+    duw_render_managed_grub "${profile}" "${payload_render_iso}" "${payload_locator}" "${with_persistence}" "${persistence_mode}" "${kernel_args}" "${menu_label}" "${kernel_override}" "${initrd_override}" "${config_path}" "${esp_uuid}" "${live_toram_override}" "${use_custom_grub_menu}" "${preserve_upstream_grub_entries}" "${include_preseed}" "${source_role}"
     duw_stage_secure_boot_assets_from_render_payload "${DUSB_MANAGED_RENDER_OUTPUT}" "${temp_root}" "${esp_mount}"
     if [ "${payload_layout}" = "iso-store" ]; then
       duw_stage_iso_store_from_render_payload "${DUSB_MANAGED_RENDER_OUTPUT}" "${payload_mount}" "${payload_mount}" "${payload_render_iso}"
@@ -5112,6 +5205,8 @@ duw_update_multios_shared_data_usb() (
   plan_path=$1
   device=$2
   config_path=$3
+  hd_media_result=$(duw_multios_hd_media_preseeds "${plan_path}" "${config_path}")
+  hd_media_mib=$(duw_bytes_to_mib "$(duw_json_field "${hd_media_result}" bytes)")
   direct_secure_boot_assets_required=0
 
   duw_validate_multios_plan "${plan_path}"
@@ -5125,6 +5220,7 @@ duw_update_multios_shared_data_usb() (
   item_count=$(duw_multios_state_count "${state_dir}")
   [ "${item_count}" -ge 1 ] || duw_die "Multi-OS requires at least one OS item"
 
+  has_split_installer=0
   index=0
   while [ "${index}" -lt "${item_count}" ]; do
     profile=$(duw_multios_state_get "${state_dir}" "${index}" profile)
@@ -5133,12 +5229,14 @@ duw_update_multios_shared_data_usb() (
     iso_path=$(duw_multios_state_get "${state_dir}" "${index}" iso_path)
     layout=$(duw_multios_state_get "${state_dir}" "${index}" layout)
     offline_preseed_dir=$(duw_multios_state_get "${state_dir}" "${index}" offline_preseed_dir)
+    duw_validate_installer_profile_assets "${profile}" "${source_role}" "${iso_path}"
+    if duw_is_split_installer "${profile}" "${source_role}"; then has_split_installer=1; fi
     if [ "${source_role}" = netboot ]; then
       [ -d "${iso_path}" ] || duw_die "netboot source must be a prepared source directory: ${iso_path}"
     else
       [ -e "${iso_path}" ] || duw_die "media source does not exist: ${iso_path}"
     fi
-    [ -z "${offline_preseed_dir}" ] || duw_die "per-plan offline preseed directories are replaced by configured PRESEED_HOST_*_PATH staging"
+    [ -z "${offline_preseed_dir}" ] || duw_die "legacy per-plan offline preseed directories are unsupported; edit and resave with explicit Desktop/Server HD-MEDIA selections"
     layout=$(duw_effective_payload_layout "${profile}" "${layout}" "${config_path}" "${use_custom_grub_menu}")
     [ "${layout}" = shared-data ] || duw_die "shared ISO-store Multi-OS update requires shared-data plan payloads, got ${layout} for ${title}"
     duw_multios_state_set "${state_dir}" "${index}" layout "${layout}"
@@ -5146,6 +5244,19 @@ duw_update_multios_shared_data_usb() (
     duw_multios_state_set "${state_dir}" "${index}" media_class "${DUSB_INSPECTED_MEDIA_CLASS}"
     index=$((index + 1))
   done
+
+  if [ "${has_split_installer}" = 1 ]; then
+    render_plan_path=${temp_root}/preflight-multios-plan.json
+    duw_multios_write_effective_plan_from_state "${plan_path}" "${render_plan_path}" "${state_dir}"
+    set -- "${render_plan_path}" "${config_path}" DUSB-PREFLIGHT-ESP
+    index=0
+    while [ "${index}" -lt "${item_count}" ]; do
+      id=$(duw_multios_state_get "${state_dir}" "${index}" id)
+      set -- "$@" "${id}=DUSB-PREFLIGHT-DATA"
+      index=$((index + 1))
+    done
+    duw_render_multios_grub "$@"
+  fi
 
   esp_mount=${temp_root}/esp
   data_mount=${temp_root}/multiboot
@@ -5164,8 +5275,9 @@ duw_update_multios_shared_data_usb() (
   esp_uuid=$(duw_partition_uuid "${esp_part}")
   data_uuid=$(duw_partition_uuid "${data_part}")
   duw_multios_stage_default_preseed_from_state "${data_mount}" "${state_dir}"
+  duw_multios_hd_media_preseeds "${plan_path}" "${config_path}" "${data_mount}" >/dev/null
 
-  for root_path in /debian-live /debian-netinst /debian-netboot /kali-live /kali-netinst /kali-netboot /kali-purple-installer /tails-live /live; do
+  for root_path in /debian-live /debian-netinst /debian-netboot /debian-netinst-de /debian-netinst-srv /debian-netboot-de /debian-netboot-srv /kali-live /kali-netinst /kali-netboot /kali-netinst-de /kali-netinst-srv /kali-netboot-de /kali-netboot-srv /kali-purple-installer /tails-live /live; do
     rm -rf -- "${data_mount}${root_path}" || duw_die "failed to replace ISO-store payload root: ${data_mount}${root_path}"
   done
   rm -rf -- "${esp_mount}/EFI/debian-usb/assets" || duw_die "failed to reset staged Secure Boot asset namespace"
@@ -5301,6 +5413,8 @@ main() (
   persistence_fs_label_override=
   persistence_partlabel_override=
   offline_preseed_dir=
+  DUSB_HD_MEDIA_DESKTOP=
+  DUSB_HD_MEDIA_SERVER=
   live_toram=
   secure_boot_trust=
   use_custom_grub_menu=0
@@ -5331,6 +5445,8 @@ main() (
       --persistence-fs-label) duw_require_option_value "$1" "${2-}"; persistence_fs_label_override=$2; shift 2 ;;
       --persistence-partlabel) duw_require_option_value "$1" "${2-}"; persistence_partlabel_override=$2; shift 2 ;;
       --offline-preseed-dir) duw_require_option_value "$1" "${2-}"; offline_preseed_dir=$2; shift 2 ;;
+      --hd-media-preseed-desktop) duw_require_option_value "$1" "${2-}"; DUSB_HD_MEDIA_DESKTOP=$2; shift 2 ;;
+      --hd-media-preseed-server) duw_require_option_value "$1" "${2-}"; DUSB_HD_MEDIA_SERVER=$2; shift 2 ;;
       --live-toram) duw_require_option_value "$1" "${2-}"; live_toram=$2; shift 2 ;;
       --secure-boot-trust) duw_require_option_value "$1" "${2-}"; secure_boot_trust=$2; shift 2 ;;
       --use-custom-grub-menu) duw_require_option_value "$1" "${2-}"; use_custom_grub_menu=$2; shift 2 ;;
@@ -5362,6 +5478,9 @@ main() (
   duw_require_root
   duw_require_commands
   duw_load_config "${config_path}"
+  if [ -n "${DUSB_HD_MEDIA_DESKTOP}${DUSB_HD_MEDIA_SERVER}" ]; then
+    [ "${write_mode}" = managed ] && duw_is_split_installer "${profile}" "${source_role}" || duw_die "HD-MEDIA flags require a managed Debian/Kali netinst or netboot source; Multi-OS carries these choices in its plan"
+  fi
   case ${live_tools_prepared} in 0|1) ;; *) duw_die "live-tools-prepared must be 0 or 1" ;; esac
   DUSB_LIVE_TOOLS_PREPARED=${live_tools_prepared}
   DUSB_OVERRIDE_ESP_LABEL=${esp_label_override}
@@ -5426,7 +5545,10 @@ main() (
   esac
   if [ "${source_role}" != primary ]; then
     case ${profile} in debian|kali-linux) ;; *) duw_die "source-role=${source_role} is only supported for Debian and Kali Linux managed flows" ;; esac
-    [ "${update_existing}" = 0 ] || duw_die "Update USB is not implemented for source-role=${source_role}"
+    [ "${with_persistence}" = 0 ] || duw_die "installer Desktop/Server sources do not support Live persistence"
+    [ -z "${offline_preseed_dir}" ] || duw_die "use --hd-media-preseed-desktop and/or --hd-media-preseed-server for installer codebases"
+    duw_validate_installer_profile_assets "${profile}" "${source_role}" "${iso_path}"
+    duw_single_hd_media_preseeds "${profile}" "${source_role}" "${config_path}" >/dev/null
   fi
 
   if [ "${with_persistence}" -eq 1 ]; then
@@ -5435,7 +5557,7 @@ main() (
     [ -n "${persistence_size_gib}" ] || persistence_size_gib=${DEFAULT_PERSISTENCE_SIZE_GIB}
     case ${persistence_size_gib} in ''|*[!0-9]*) duw_die "persistence size must be a positive integer" ;; esac
     [ "${persistence_size_gib}" -gt 0 ] || duw_die "persistence size must be positive"
-    if [ "${profile}" = tails ] && [ "${persistence_mode}" != encrypted ]; then duw_die "Tails managed persistence is encrypted only"; fi
+    if [ "${profile}" = tails ]; then duw_die "Tails native Persistent Storage is not supported on managed/multi-OS USBs; use the official Tails USB image on a dedicated device"; fi
     if [ "${persistence_mode}" = encrypted ] && [ "${profile}" != debian ] && [ "${profile}" != kali-linux ] && [ "${profile}" != tails ]; then
       duw_die "encrypted persistence is currently supported only for Debian, Kali Linux, and Tails live media"
     fi
@@ -5445,7 +5567,7 @@ main() (
   fi
 
   if [ "${update_existing}" = 1 ]; then
-    duw_update_managed_usb "${profile}" "${iso_path}" "${device}" "${with_persistence}" "${persistence_mode}" "${persistence_size_gib}" "${kernel_args}" "${menu_label}" "${kernel_path}" "${initrd_path}" "${config_path}" "${live_toram}" "${use_custom_grub_menu}" "${preserve_upstream_grub_entries}" "${offline_preseed_dir}" "${include_preseed}"
+    duw_update_managed_usb "${profile}" "${iso_path}" "${device}" "${with_persistence}" "${persistence_mode}" "${persistence_size_gib}" "${kernel_args}" "${menu_label}" "${kernel_path}" "${initrd_path}" "${config_path}" "${live_toram}" "${use_custom_grub_menu}" "${preserve_upstream_grub_entries}" "${offline_preseed_dir}" "${include_preseed}" "${source_role}"
   else
     duw_build_managed_usb "${profile}" "${iso_path}" "${device}" "${source_role}" "${with_persistence}" "${persistence_mode}" "${persistence_size_gib}" "${kernel_args}" "${menu_label}" "${kernel_path}" "${initrd_path}" "${config_path}" "${live_toram}" "${use_custom_grub_menu}" "${preserve_upstream_grub_entries}" "${offline_preseed_dir}" "${include_preseed}"
   fi

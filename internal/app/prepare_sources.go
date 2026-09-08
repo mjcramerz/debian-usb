@@ -66,6 +66,13 @@ func (b *Backend) resolveSourceInput(input SourceInput) (string, error) {
 
 func (b *Backend) materializeSelectedSource(profile, role, path string, p *SourcePreparation) (string, error) {
 	if p == nil {
+		if splitInstallerProfile(profile, role) {
+			var result map[string]any
+			if err := b.runJSON(true, &result, "ensure-installer-profiles", "--source-path", path,
+				"--profile", profile, "--source-role", role); err != nil {
+				return "", err
+			}
+		}
 		return path, nil
 	}
 	if err := p.validate(role); err != nil {
@@ -94,6 +101,18 @@ func (b *Backend) materializeSelectedSource(profile, role, path string, p *Sourc
 // update and saved executions. Live changes are passed together to one remaster.
 func (b *Backend) prepareSelectedSource(profile, role, path, media, writeMode string,
 	p *SourcePreparation, groups []string, encrypted, requireSudo bool) (string, error) {
+	if profile == profileTails && (encrypted || len(groups) > 0 || (p != nil && p.InitrdOverlayDir != "")) {
+		return "", fmt.Errorf("Tails requires an unmodified stock ISO; remastering and native Persistent Storage are not supported in managed/multi-OS mode")
+	}
+	// Revalidate persisted selections before downloads or remastering. A saved
+	// pre-scope All selection must not send Kali's wireless group to Debian.
+	if writeMode != writeModeDirect {
+		validated, err := validateLiveToolGroupSelection(profile, groups)
+		if err != nil {
+			return "", err
+		}
+		groups = validated
+	}
 	materialized, err := b.materializeSelectedSource(profile, role, path, p)
 	if err != nil {
 		return "", err
@@ -129,8 +148,12 @@ func (b *Backend) prepareSelectedSource(profile, role, path, media, writeMode st
 	}
 	// Legacy Debian plans also need the mandatory overlay, applied AFTER package
 	// installation by the initramfs hook, not to an initrd that will be replaced.
-	if overlay == "" && profile == profileDebian && b.initrdRoot != "" {
-		overlay = filepath.Join(b.initrdRoot, "debian", "live")
+	if overlay == "" && (profile == profileDebian || profile == profileKaliLinux) && b.initrdRoot != "" {
+		family := "debian"
+		if profile == profileKaliLinux {
+			family = "kali"
+		}
+		overlay = filepath.Join(b.initrdRoot, family, "live")
 	}
 	needCrypto := encrypted && (p == nil || !inspection.SupportsEncryptedPersistence)
 	if needCrypto && !remasterEncryptedPersistenceEligible(profileSpecs[profile], role, ISOInspection{MediaClass: media}) {
@@ -178,7 +201,7 @@ func (b *Backend) remasterLiveSource(profile, source string, groups []string, ov
 	if encrypted {
 		args = append(args, "--ensure-encrypted-persistence")
 	}
-	if profile == profileDebian {
+	if profile == profileDebian || profile == profileKaliLinux {
 		args = append(args, "--live-kernel-args", mandatoryDebianLiveHookKernelArgs)
 	}
 	var result struct {

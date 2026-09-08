@@ -407,7 +407,7 @@ func TestBuildCreatePlanRejectsPlainTailsPersistence(t *testing.T) {
 			SupportsEncryptedPersistence: true,
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "Tails persistence must be encrypted") {
+	if err == nil || !strings.Contains(err.Error(), "Tails native Persistent Storage") {
 		t.Fatalf("expected Tails encrypted persistence validation error, got %v", err)
 	}
 }
@@ -644,7 +644,7 @@ func TestMultiOSTechnicalSpecRowsStayCompact(t *testing.T) {
 		"Write=multi-os | sources=2 | mode=multi-os | overwrite=yes",
 		"USB Layout=GPT: raw ISO payload partitions with netinst/installer sources first, then live sources | ESP FAT32 ESPBOOT after payloads for GRUB + /preseed",
 		"OS Entries=Debian; Kali Linux Netinst",
-		"Automation=preseed=Kali Linux Netinst | persistence=off | secureboot=mok | default_preseed_sources=PRESEED_HOST_{DEBIAN,KALI,PURPLE}_PATH | preseed_stage=dirname(PRESEED_USB_*_FILE) | payloads=raw-iso partitions per source",
+		"Automation=preseed=Kali Linux Netinst | persistence=off | secureboot=mok | installer_preseed_sources=explicit consent only (HOST paths are prompt defaults) | installer_preseed_stage=p2:/<distro>-preseed-{de,srv} | payloads=raw-iso partitions per source",
 	} {
 		if !strings.Contains(combined, fragment) {
 			t.Fatalf("expected %q in compact Multi-OS technical spec summary:\n%s", fragment, combined)

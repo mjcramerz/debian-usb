@@ -1,5 +1,103 @@
 # Validation record
 
+## September 8, 2026 - installer device-node repair (current)
+
+The previous profile splitter used an ordinary-file tree copier on an extracted
+initrd and failed on device nodes. This release copies and independently extracts
+each source archive instead. It also preserves internal hard links, original
+compression, leading early-cpio segments and archive mode. See
+`INITRD-DEVICE-REPAIR-2026-09-08.md` for changes, reproduction and recovery steps.
+
+The full check passed: **417 Python tests, no skips**, **164 top-level Go tests**
+(236 passing test events), six shell fixtures and staged-install assertions.
+Separate Go vet/race/build/help checks passed. The entire 417-test Python suite and the eight new archive tests also
+passed as an unprivileged user, with no skips. Syntax checks cover 55 Python files, 19 POSIX shell
+scripts and 37 JSON documents. Current logs are in
+`validation/2026-09-08-initrd-device-repair/`.
+
+Character/block-device tests use fakeroot metadata with real cpio and independent
+newc-header inspection, because native mknod is denied in this container. No exact
+user ISO build, physical USB or VM boot was tested. Go checks used 1.23.2 with an
+external compatibility modfile; the shipped `go.mod` still requires 1.24.0 and no
+compatibility executable is shipped. Repeat the checks with the deployment
+host's matching toolchain. The hardware acceptance gates below remain open.
+
+The records below are historical. Their passing ordinary-file fixtures did not
+cover the defect reported after the initial September 8 release.
+
+## September 8, 2026 - installer, persistence and Live networking refactor
+
+The complete check recipe passed after this refactor, including 409 Python
+tests (no skips), all Go tests, six shell fixtures and a staged installation
+of both Debian and Kali Live assets. Go JSON results contain 164 top-level
+tests and 236 passing test events including subtests. Separate `go vet` and
+race-detector runs passed. Individually checked syntax: 53 Python files,
+19 POSIX shell scripts and 34 JSON documents. The Makefile now checks shell
+files individually rather than passing extra filenames as script arguments.
+
+New regression coverage exercises consent-only host preseed migration, the
+shared Wi-Fi runtime, exact SSID matching, private configuration writes,
+failed activation rollback, DNS/route priority, separate Debian/Kali staging,
+optional target-repository package resolution, and all public Tails remaster
+guards. The real writer's persistence allocator passes 15 mocked layout
+scenarios spanning disabled/selected items and sdX/NVMe/MMC naming. Existing
+installer tests exercise independent Desktop/Server archives and transport
+selection using generated cpio fixtures.
+
+Current logs are in `validation/2026-09-08-refactor/`. Earlier records below
+are historical, not new measurements. Tests use fake disks, mocked network
+activation and isolated package/archive fixtures. They do not perform a full
+Kali/Debian ISO remaster, install the complete live toolset from online
+repositories, boot a VM, create real USB partitions, exercise Wi-Fi radio
+hardware, or verify Secure Boot/LUKS in firmware. Package availability is
+resolved against the target repositories when an actual build runs.
+
+The environment has Go 1.23.2 and Python 3.13.5. The unchanged `go.mod` declares
+Go 1.24.0; its automatic toolchain download could not resolve the download
+host here. As in the earlier repair, validation used an external temporary
+modfile with only the Go directive changed to 1.23.0. Commands were:
+
+```sh
+GOTOOLCHAIN=local GOFLAGS=-modfile=/mnt/data/go.validation.mod make check
+GOTOOLCHAIN=local GOFLAGS=-modfile=/mnt/data/go.validation.mod go vet ./...
+GORACE=atexit_sleep_ms=0 GOTOOLCHAIN=local \
+  GOFLAGS=-modfile=/mnt/data/go.validation.mod go test -race -timeout=90s ./...
+```
+
+That external modfile is not included and is not required on a correctly
+provisioned host. Build and repeat `make check` with Go 1.24+ before deployment.
+The delivered tarball is source-only; the stale input executable and obsolete
+rendered GRUB snapshots are deliberately removed, not represented as rebuilt
+binaries or current boot menus.
+
+### Remaining hardware acceptance gates
+
+On a disposable USB, confirm the exact target identity before creation. Test
+Debian and Kali Live separately and together, with persistence off, enabled
+only for the later-selected OS, and enabled for both. Verify partition numbers,
+UUIDs, sizes and labels; write distinct files in each persistent root and reboot
+each OS to prove isolation. Test plain and LUKS modes independently.
+
+Boot each Debian/Kali netinst/netboot Desktop/Server entry with unique harmless
+fixture preseeds for all four transports. Decline HD-MEDIA copying, confirm
+creation still succeeds, then add the codebase to partition 2 and verify the
+pre-existing menu works. Confirm the installer cannot consume another flavor's
+embedded or HD-MEDIA preseed. Netboot requires the matching USB/ext4 drivers.
+
+For both Live families, test simultaneous Ethernet/Wi-Fi, absent SSID, wrong
+password, DHCP and static IPv4, explicit DNS, replug/DHCP renewal and the
+interactive home launcher. Inspect IPv4 and IPv6 default routes and resolver
+selection. Test supported firmware/chipsets and radio regulatory behavior.
+Review `optional-packages.json`; missing requested tools must not be treated as
+installed. Verify resulting initrds contain the matching environment and module
+closure for each kernel ABI, without copying secrets into kernel arguments.
+
+Tails custom-GRUB boot remains experimental and untested on hardware. Native
+Tails persistence, upgrade integrity and its full security behavior are not
+claimed. Use the official Tails USB image on a dedicated device for supported
+operation. No generic Tails persistence partition is created by this code.
+
+
 ## September 6, 2026 - build repair
 
 The repaired source passed the complete make-check recipe: 355 Python tests with

@@ -63,7 +63,9 @@ class LiveToolProfileTests(unittest.TestCase):
         ubuntu_packages, _ = live_tools.live_tool_packages_for_profile("ubuntu-desktop")
 
         self.assertEqual(debian_packages, profile["packages"])
-        self.assertEqual(kali_packages, profile["packages"])
+        self.assertTrue(set(profile["packages"]) < set(kali_packages))
+        self.assertIn("kali-tools-wireless", kali_packages)
+        self.assertNotIn("kali-tools-wireless", debian_packages)
         self.assertEqual(ubuntu_build_packages, profile["packages"])
         self.assertEqual(ubuntu_packages, profile["packages"])
 
@@ -123,7 +125,7 @@ class LiveToolProfileTests(unittest.TestCase):
             profile_path.write_text(
                 json.dumps(
                     {
-                        "schema_version": 2,
+                        "schema_version": live_tools.LIVE_TOOL_PROFILE_SCHEMA_VERSION,
                         "supported_profiles": ["debian"],
                         "build_distros": {"debian": "debian"},
                         "package_groups": [

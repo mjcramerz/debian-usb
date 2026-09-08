@@ -47,6 +47,11 @@ from .constants import (
 from .initrd_overlay import merge_initrd_overlay
 from .iso_source import _normalize_member_path, open_source
 from .live_hooks import (
+    live_hook_packages,
+    live_optional_firmware,
+    debian_live_env_path,
+    load_debian_live_wifi_config,
+    stage_live_wifi_runtime,
     DEBIAN_LIVE_HOOK_KERNEL_ARGS,
     DEBIAN_LIVE_HOOK_PACKAGES,
     DEBIAN_LIVE_INITRAMFS_MODULES,
@@ -98,7 +103,6 @@ LIVE_INITRD_OVERLAY_APT_DEPS = ["bzip2", "cpio", "findutils", "gzip", "lz4", "xo
 LIVE_INITRD_OVERLAY_PROFILES = {
     PROFILE_DEBIAN,
     PROFILE_KALI_LINUX,
-    PROFILE_TAILS,
     PROFILE_UBUNTU_DESKTOP,
     PROFILE_UBUNTU_SERVER,
 }
@@ -258,106 +262,13 @@ def inspect_debian_rebuild_source(source_iso_path: str) -> dict[str, Any]:
 
 
 def remaster_live_persistence_source(source_iso_path: str, profile: str) -> dict[str, Any]:
-    ensure_debian_rebuild_deps()
-    if profile not in {PROFILE_DEBIAN, PROFILE_KALI_LINUX, PROFILE_TAILS}:
-        raise ValueError(f"encrypted persistence remaster is supported only for Debian, Kali Linux, and Tails: {profile}")
-    packages = list(LIVE_PERSISTENCE_SUPPORT_PACKAGES)
-    if profile == PROFILE_DEBIAN:
-        packages = _dedupe([*DEBIAN_LIVE_HOOK_PACKAGES, *packages])
-    source_path = _validate_absolute_path(
-        source_iso_path,
-        allow_missing=False,
-        expect_directory=False,
-        label="source_iso_path",
-    )
-    source = open_source(source_path)
-    entries = _find_boot_entries(source)
-    media_class = _media_class(entries)
-    if media_class not in {"live", "hybrid"}:
-        raise RuntimeError(f"encrypted persistence remaster requires live or hybrid media, got {media_class or '<unknown>'}")
-    live_entry = _select_entry(profile, entries)
-    live_rootfs_path = _find_existing_member(source, LIVE_ROOTFS_CANDIDATES)
-    live_initrd_paths = _collect_live_entry_member_paths(entries, "initrd_path")
-    if not live_entry or not live_entry.initrd_path or not live_rootfs_path:
-        raise RuntimeError("The selected source ISO does not expose a live kernel, initrd, and squashfs root filesystem.")
-    if not live_rootfs_path.endswith(".squashfs"):
-        raise RuntimeError(f"Encrypted persistence remaster currently requires squashfs media, got {live_rootfs_path}")
-    architecture = _infer_architecture(entries, live_entry.kernel_path, live_entry.initrd_path)
-    if architecture and architecture != _host_architecture():
-        raise RuntimeError(
-            f"Encrypted persistence remaster currently requires a matching host and ISO architecture. "
-            f"Source ISO: {architecture}, host: {_host_architecture()}"
-        )
-
-    run_id = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
-    workspace_dir = DEFAULT_WORK_DIR / "remaster-live-persistence" / run_id
-    state_dir = DEFAULT_STATE_DIR / "remaster-live-persistence" / run_id
-    log_dir = DEFAULT_LOG_DIR / "remaster-live-persistence"
-    output_dir = DEFAULT_REBUILD_OUTPUT_DIR / "persistence"
-    source_file = Path(source_path)
-    final_iso_path = output_dir / f"{source_file.stem}-luks-persistence.iso"
-    created_output_directories = _missing_output_directories(output_dir)
-    for path in (workspace_dir, state_dir, log_dir, output_dir):
-        path.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"{run_id}.log"
-    iso_root = workspace_dir / "iso-root"
-    iso_root.mkdir(parents=True, exist_ok=True)
-
-    with log_path.open("w", encoding="utf-8") as log_file:
-        _run_logged(
-            ["xorriso", "-osirrox", "on", "-indev", source_path, "-extract", "/", str(iso_root)],
-            cwd=workspace_dir,
-            log_file=log_file,
-        )
-        _ensure_extracted_iso_root_access(iso_root)
-        modified_paths = _apply_live_persistence_remaster(
-            live_rootfs_path=live_rootfs_path,
-            live_initrd_path=live_entry.initrd_path,
-            live_initrd_paths=live_initrd_paths,
-            live_kernel_path=live_entry.kernel_path,
-            packages=packages,
-            profile=profile,
-            iso_root=iso_root,
-            workspace_dir=workspace_dir,
-            log_file=log_file,
-        )
-        _rewrite_checksum_files(iso_root)
-        if final_iso_path.exists():
-            final_iso_path.unlink()
-        _run_logged(
-            [
-                "xorriso",
-                "-indev",
-                source_path,
-                "-outdev",
-                str(final_iso_path),
-                "-boot_image",
-                "any",
-                "replay",
-                "-map",
-                str(iso_root),
-                "/",
-                "-commit",
-                "-end",
-            ],
-            cwd=workspace_dir,
-            log_file=log_file,
-        )
-
-    _finalize_rebuild_output_access(final_iso_path, created_output_directories)
-    manifest = {
-        "run_id": run_id,
-        "profile": profile,
-        "source_iso_path": source_path,
-        "iso_path": str(final_iso_path),
-        "workspace_dir": str(workspace_dir),
-        "log_path": str(log_path),
-        "modified_paths": modified_paths,
-        "packages": packages,
-    }
-    manifest_path = state_dir / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    return manifest
+    """Compatibility entry point using the same single-pass Live pipeline."""
+    if profile == PROFILE_TAILS:
+        raise ValueError("Tails native Persistent Storage requires the official USB image on a dedicated device")
+    if profile not in {PROFILE_DEBIAN, PROFILE_KALI_LINUX}:
+        raise ValueError(f"encrypted persistence remaster supports only Debian and Kali Linux: {profile}")
+    return remaster_live_tools_source(source_iso_path, profile, selected_groups=[],
+                                     ensure_encrypted_persistence=True)
 
 
 def _existing_storage_anchor(path: Path) -> Path:
@@ -919,13 +830,15 @@ def remaster_live_tools_source(
     The caller collects choices first. This function performs no USB writes.
     The source ISO is immutable; output is published atomically after success.
     """
+    if profile == PROFILE_TAILS:
+        raise ValueError("Tails remastering is not supported: keep its stock ISO, initrd and security configuration unchanged")
     if overlay_dir:
         overlay_dir = _validate_absolute_path(
             overlay_dir, allow_missing=False, expect_directory=True, label="overlay_dir"
         )
-    if ensure_encrypted_persistence and profile not in {PROFILE_DEBIAN, PROFILE_KALI_LINUX, PROFILE_TAILS}:
+    if ensure_encrypted_persistence and profile not in {PROFILE_DEBIAN, PROFILE_KALI_LINUX}:
         raise ValueError(f"Encrypted persistence is not supported for profile {profile}")
-    if profile in {PROFILE_TAILS, PROFILE_UBUNTU_SERVER} and selected_groups == []:
+    if profile == PROFILE_UBUNTU_SERVER and selected_groups == []:
         selected_packages = []
         live_tool_profile = {"path": "", "sha256": "", "name": "live-customization", "selected_groups": []}
     else:
@@ -933,8 +846,15 @@ def remaster_live_tools_source(
             profile, selected_groups=selected_groups,
         )
     packages = list(selected_packages)
-    if profile == PROFILE_DEBIAN:
-        packages = _dedupe([*DEBIAN_LIVE_HOOK_PACKAGES, *packages])
+    optional_packages = list(live_tool_profile.get("optional_packages", [])) + live_optional_firmware(profile)
+    if profile == PROFILE_KALI_LINUX:
+        optional_packages = _dedupe([*selected_packages, *optional_packages])
+    wifi_source = ""
+    if profile in {PROFILE_DEBIAN, PROFILE_KALI_LINUX}:
+        source_env = Path(overlay_dir) / "live.env" if overlay_dir else None
+        wifi_source = str(debian_live_env_path(source_env if source_env and source_env.is_file() else "", profile))
+        load_debian_live_wifi_config(wifi_source, profile)  # Fail before package work.
+        packages = _dedupe([*live_hook_packages(profile), *packages, *optional_packages])
     if ensure_encrypted_persistence:
         packages = _dedupe([*packages, *LIVE_PERSISTENCE_SUPPORT_PACKAGES, "initramfs-tools"])
     if overlay_dir:
@@ -944,9 +864,9 @@ def remaster_live_tools_source(
     # All package triggers were deferred; each modified Live ISO needs a final initrd.
     packages = _dedupe([*packages, "initramfs-tools"])
     normalized_live_kernel_args = _validate_live_kernel_args(live_kernel_args)
-    if profile != PROFILE_DEBIAN and normalized_live_kernel_args:
-        raise ValueError("Live hook kernel arguments are supported only for Debian Live remasters")
-    if profile == PROFILE_DEBIAN:
+    if profile not in {PROFILE_DEBIAN, PROFILE_KALI_LINUX} and normalized_live_kernel_args:
+        raise ValueError("Live hook kernel arguments are supported only for Debian/Kali Live remasters")
+    if profile in {PROFILE_DEBIAN, PROFILE_KALI_LINUX}:
         normalized_live_kernel_args = _merge_live_kernel_line(
             normalized_live_kernel_args,
             " ".join(DEBIAN_LIVE_HOOK_KERNEL_ARGS),
@@ -1044,6 +964,8 @@ def remaster_live_tools_source(
                 overlay_dir=overlay_dir,
                 ensure_encrypted_persistence=ensure_encrypted_persistence,
                 live_entries=entries,
+                live_env_source=wifi_source,
+                optional_packages=optional_packages,
             )
             if normalized_live_kernel_args:
                 modified_paths = _dedupe(
@@ -1108,7 +1030,9 @@ def remaster_live_tools_source(
         "warnings": [cleanup_warning] if cleanup_warning else [],
         "modified_paths": modified_paths,
         "packages": packages,
-        "required_live_packages": list(DEBIAN_LIVE_HOOK_PACKAGES) if profile == PROFILE_DEBIAN else [],
+        "required_live_packages": live_hook_packages(profile),
+        "optional_live_packages": optional_packages,
+        "packages_semantics": "requested packages; unavailable optional names are recorded inside the Live root at /var/log/debian-usb/optional-packages.json",
         "selected_groups": list(live_tool_profile["selected_groups"]),
         "initrd_overlay_dir": overlay_dir,
         "ensure_encrypted_persistence": ensure_encrypted_persistence,
@@ -1201,9 +1125,9 @@ def _patch_live_boot_configs(iso_root: Path, live_kernel_args: str) -> list[str]
     return modified_paths
 
 
-def _stage_debian_live_iso_policy(iso_root: Path) -> list[str]:
-    staged_hooks = stage_debian_live_config_hooks(iso_root / "live")
-    staged_wifi = stage_debian_live_medium_wifi_config(iso_root / "live")
+def _stage_debian_live_iso_policy(iso_root: Path, profile: str = PROFILE_DEBIAN, live_env_source: str = "") -> list[str]:
+    staged_hooks = stage_debian_live_config_hooks(iso_root / "live", profile)
+    staged_wifi = stage_debian_live_medium_wifi_config(iso_root / "live", live_env_source, profile)
     staged_paths = [
         "/" + path.relative_to(iso_root).as_posix()
         for path in [*staged_hooks, staged_wifi]
@@ -1215,10 +1139,11 @@ def _stage_debian_live_iso_policy(iso_root: Path) -> list[str]:
     return _dedupe([*staged_paths, *boot_paths])
 
 
-def _stage_debian_live_root_policy(live_root: Path) -> None:
+def _stage_debian_live_root_policy(live_root: Path, profile: str = PROFILE_DEBIAN, live_env_source: str = "") -> None:
     stage_live_kernel_module_policy(live_root, DEBIAN_LIVE_INITRAMFS_MODULES)
-    stage_debian_live_wifi_config(live_root)
-    stage_debian_live_apt_policy(live_root)
+    stage_live_wifi_runtime(live_root, live_env_source, profile)
+    if profile == PROFILE_DEBIAN:
+        stage_debian_live_apt_policy(live_root)
 
 
 def rebuild_debian_installer_iso(plan_path: str) -> dict[str, Any]:
@@ -1515,64 +1440,6 @@ def _apply_live_host_rebuild_action(
     }
 
 
-def _apply_live_persistence_remaster(
-    *,
-    live_rootfs_path: str,
-    live_initrd_path: str,
-    live_initrd_paths: list[str],
-    live_kernel_path: str,
-    packages: list[str],
-    profile: str,
-    iso_root: Path,
-    workspace_dir: Path,
-    log_file: Any,
-) -> list[str]:
-    processors = _squashfs_processor_count()
-    extracted_rootfs = iso_root / live_rootfs_path.lstrip("/")
-    live_root = workspace_dir / "live-root"
-    _run_logged(
-        ["unsquashfs", "-processors", str(processors), "-d", str(live_root), str(extracted_rootfs)],
-        cwd=workspace_dir,
-        log_file=log_file,
-    )
-    if profile == PROFILE_DEBIAN:
-        _stage_debian_live_root_policy(live_root)
-    _install_packages_in_chroot(live_root, packages, log_file, apt_source_root=iso_root)
-    with _mounted_chroot(live_root, log_file):
-        _run_in_chroot(
-            live_root,
-            _chroot_noninteractive_command("update-initramfs", "-u", "-k", "all"),
-            log_file,
-        )
-    stage_live_systemd_masks(live_root)
-    kernel_version = _detect_live_root_kernel_version(live_root, live_kernel_path)
-    rebuilt_initrd = _resolve_live_root_initrd_file(live_root, kernel_version)
-    modified_initrd_paths = _copy_file_to_member_paths(
-        rebuilt_initrd,
-        iso_root,
-        _coerce_member_path_list(live_initrd_paths, fallback=[live_initrd_path]),
-    )
-    policy_paths = _stage_debian_live_iso_policy(iso_root) if profile == PROFILE_DEBIAN else []
-    _refresh_live_metadata(live_root, iso_root, live_rootfs_path)
-    compression = _squashfs_compression(extracted_rootfs, processors=processors)
-    extracted_rootfs.unlink()
-    _run_logged(
-        [
-            "mksquashfs",
-            str(live_root),
-            str(extracted_rootfs),
-            "-noappend",
-            "-comp",
-            compression,
-            "-processors",
-            str(processors),
-        ],
-        cwd=workspace_dir,
-        log_file=log_file,
-    )
-    return _dedupe([live_rootfs_path, *modified_initrd_paths, *policy_paths])
-
-
 def _apply_live_tools_remaster(
     *,
     live_rootfs_path: str,
@@ -1588,6 +1455,8 @@ def _apply_live_tools_remaster(
     overlay_dir: str = "",
     ensure_encrypted_persistence: bool = False,
     live_entries: list[Any] | None = None,
+    live_env_source: str = "",
+    optional_packages: list[str] | None = None,
 ) -> list[str]:
     processor_count = processors or _squashfs_processor_count()
     extracted_rootfs = iso_root / live_rootfs_path.lstrip("/")
@@ -1599,11 +1468,12 @@ def _apply_live_tools_remaster(
     )
     if profile == PROFILE_DEBIAN:
         stage_debian_live_locale(live_root)
-        _stage_debian_live_root_policy(live_root)
+    if profile in {PROFILE_DEBIAN, PROFILE_KALI_LINUX}:
+        _stage_debian_live_root_policy(live_root, profile, live_env_source)
     # Package maintainer scripts and triggers must not repeatedly generate an
     # initrd before the complete module/crypto/overlay policy is in place.
     with _deferred_initramfs_updates(live_root, log_file):
-        _install_packages_in_chroot(live_root, packages, log_file, apt_source_root=iso_root)
+        _install_packages_in_chroot(live_root, packages, log_file, apt_source_root=iso_root, optional_packages=optional_packages)
     stage_live_systemd_masks(live_root)
     if ensure_encrypted_persistence:
         _stage_encrypted_persistence_policy(live_root)
@@ -1647,8 +1517,8 @@ def _apply_live_tools_remaster(
             modified_initrd_paths.extend(_copy_file_to_member_paths(generated[version], iso_root, [member]))
 
     hook_paths: list[str] = []
-    if profile == PROFILE_DEBIAN:
-        hook_paths = _stage_debian_live_iso_policy(iso_root)
+    if profile in {PROFILE_DEBIAN, PROFILE_KALI_LINUX}:
+        hook_paths = _stage_debian_live_iso_policy(iso_root, profile, live_env_source)
     _refresh_live_metadata(live_root, iso_root, live_rootfs_path)
     compression = _squashfs_compression(extracted_rootfs, processors=processor_count)
     extracted_rootfs.unlink()
@@ -1972,8 +1842,11 @@ def _install_packages_in_chroot(
     log_file: Any,
     *,
     apt_source_root: Path | None = None,
+    optional_packages: list[str] | None = None,
 ) -> None:
-    if not packages:
+    optional = list(dict.fromkeys(optional_packages or []))
+    packages = [package for package in packages if package not in optional]
+    if not packages and not optional:
         return
     extra_binds: list[tuple[Path, Path]] = []
     if apt_source_root is not None:
@@ -1986,11 +1859,19 @@ def _install_packages_in_chroot(
             with _temporary_chroot_apt_config(live_root, apt_source_root) as apt_config:
                 with _mounted_chroot(live_root, log_file, extra_binds=extra_binds):
                     _run_in_chroot(live_root, _apt_get_chroot_command(apt_config, "update"), log_file)
-                    _run_in_chroot(
-                        live_root,
-                        _apt_get_chroot_command(apt_config, "install", "-y", "--no-install-recommends", *packages),
-                        log_file,
-                    )
+                    if packages:
+                        _run_in_chroot(live_root, _apt_get_chroot_command(apt_config, "-s", "install", "--no-install-recommends", *packages), log_file)
+                        _run_in_chroot(live_root, _apt_get_chroot_command(apt_config, "install", "-y", "--no-install-recommends", *packages), log_file)
+                    if optional:
+                        helper = _prepare_live_root_directory(live_root, "usr/local/lib/debian-usb") / "live-packages.py"
+                        if helper.is_symlink():
+                            raise ValueError("refusing symlinked optional package helper")
+                        shutil.copyfile(Path(__file__).with_name("live_packages.py"), helper)
+                        command = _chroot_noninteractive_command("python3", "/usr/local/lib/debian-usb/live-packages.py",
+                            "--apt-list", apt_config["list_path"], "--apt-parts", apt_config["parts_dir"])
+                        for package in optional:
+                            command += ["--package", package]
+                        _run_in_chroot(live_root, command, log_file)
                     _run_in_chroot(live_root, _apt_get_chroot_command(apt_config, "clean"), log_file)
 
 
@@ -2297,6 +2178,7 @@ def _apt_get_chroot_command(apt_config: dict[str, str], *args: str) -> list[str]
         f"Dir::Etc::sourceparts={apt_config['parts_dir']}",
         "-o",
         "Acquire::Retries=3",
+        "-o", "APT::Update::Error-Mode=any",
         *args,
     ]
 

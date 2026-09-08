@@ -1,7 +1,8 @@
 build/
 configs/debian-usb.conf.*
 examples/
-initrd/debian/netinst/*.asc
+initrd/debian/netinst/desktop/*.asc
+initrd/debian/netinst/server/*.asc
 apt-update
 .mypy_cache/
 docs/validation/

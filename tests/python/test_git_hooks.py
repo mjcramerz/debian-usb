@@ -41,7 +41,7 @@ class GitSecretHookTests(unittest.TestCase):
         (self.repo / ".githooks").mkdir()
         (self.repo / "scripts").mkdir()
         (self.repo / "configs").mkdir()
-        (self.repo / "initrd/debian/netinst").mkdir(parents=True)
+        (self.repo / "initrd/debian/netinst/desktop").mkdir(parents=True)
         (self.repo / "initrd/debian/live").mkdir(parents=True)
         (self.repo / "initrd/custom").mkdir(parents=True)
         for relative in (
@@ -57,7 +57,7 @@ class GitSecretHookTests(unittest.TestCase):
             destination.chmod(0o755)
 
         self.config = self.repo / "configs/debian-usb.conf"
-        self.preseed = self.repo / "initrd/debian/netinst/preseed.env"
+        self.preseed = self.repo / "initrd/debian/netinst/desktop/preseed.env"
         self.live = self.repo / "initrd/debian/live/live.env"
         self.service = self.repo / "initrd/custom/service.conf"
         self._write_secret_files()
@@ -94,7 +94,7 @@ class GitSecretHookTests(unittest.TestCase):
         legacy_suffix = f" {legacy}=legacy-fixture" if legacy else ""
         self.config.write_text(
             'DEFAULT_LIVE_WIFI_PSK=""\n'
-            f'PRESEED_ONE_ARGS_DEBIAN="classes=test{legacy_suffix}"\n',
+            f'PRESEED_ONE_ARGS_DEBIAN_DE="classes=test{legacy_suffix}"\n',
             encoding="utf-8",
         )
         lines = ["# Test preseed environment", ""]
@@ -172,7 +172,7 @@ class GitSecretHookTests(unittest.TestCase):
         self._write_secret_files(root_password=root_value, wifi=wifi_value)
         self._git(
             "add",
-            "initrd/debian/netinst/preseed.env",
+            "initrd/debian/netinst/desktop/preseed.env",
             "initrd/debian/live/live.env",
         )
 
@@ -180,7 +180,7 @@ class GitSecretHookTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn(
-            "index initrd/debian/netinst/preseed.env: PRESEED_ROOT_PASSWORD",
+            "index initrd/debian/netinst/desktop/preseed.env: PRESEED_ROOT_PASSWORD",
             result.stderr,
         )
         self.assertIn(
@@ -193,10 +193,10 @@ class GitSecretHookTests(unittest.TestCase):
     def test_manual_scanner_rejects_secret_in_outgoing_history(self) -> None:
         secret_value = "scanner-history-fixture"
         self._write_secret_files(root_password=secret_value)
-        self._git("add", "initrd/debian/netinst/preseed.env")
+        self._git("add", "initrd/debian/netinst/desktop/preseed.env")
         self._git("commit", "--no-verify", "-m", "scanner secret snapshot")
         self._write_secret_files()
-        self._git("add", "initrd/debian/netinst/preseed.env")
+        self._git("add", "initrd/debian/netinst/desktop/preseed.env")
         self._git("commit", "--no-verify", "-m", "scanner clear snapshot")
 
         result = self._run_scanner("--pre-push", input_text=self._pre_push_update())
@@ -204,7 +204,7 @@ class GitSecretHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("outgoing ", result.stderr)
         self.assertIn(
-            "initrd/debian/netinst/preseed.env: PRESEED_ROOT_PASSWORD",
+            "initrd/debian/netinst/desktop/preseed.env: PRESEED_ROOT_PASSWORD",
             result.stderr,
         )
         self.assertNotIn(secret_value, result.stdout + result.stderr)
@@ -275,7 +275,7 @@ class GitSecretHookTests(unittest.TestCase):
     def test_pre_commit_clears_index_without_staging_unrelated_worktree_edits(self) -> None:
         secret_value = "partial-stage-secret-fixture"
         self._write_secret_files(root_password=secret_value, non_secret="staged")
-        self._git("add", "initrd/debian/netinst/preseed.env")
+        self._git("add", "initrd/debian/netinst/desktop/preseed.env")
         worktree_text = self.preseed.read_text(encoding="utf-8").replace(
             "INSTALL_LOCALE='staged'",
             "INSTALL_LOCALE='unstaged'",
@@ -285,13 +285,13 @@ class GitSecretHookTests(unittest.TestCase):
         result = self._run_hook("pre-commit")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        index_text = self._git("show", ":initrd/debian/netinst/preseed.env").stdout
+        index_text = self._git("show", ":initrd/debian/netinst/desktop/preseed.env").stdout
         worktree_text = self.preseed.read_text(encoding="utf-8")
         self.assertIn("PRESEED_ROOT_PASSWORD=''", index_text)
         self.assertIn("PRESEED_ROOT_PASSWORD=''", worktree_text)
         self.assertIn("INSTALL_LOCALE='staged'", index_text)
         self.assertIn("INSTALL_LOCALE='unstaged'", worktree_text)
-        self.assertIn("index initrd/debian/netinst/preseed.env", result.stdout)
+        self.assertIn("index initrd/debian/netinst/desktop/preseed.env", result.stdout)
         self.assertNotIn(secret_value, result.stdout + result.stderr)
 
     def test_installed_pre_commit_allows_commit_and_commits_cleared_value(self) -> None:
@@ -320,13 +320,13 @@ class GitSecretHookTests(unittest.TestCase):
     def test_pre_push_never_blocks_an_existing_secret_commit(self) -> None:
         secret_value = "outgoing-history-fixture"
         self._write_secret_files(access_key=secret_value)
-        self._git("add", "initrd/debian/netinst/preseed.env")
+        self._git("add", "initrd/debian/netinst/desktop/preseed.env")
         self._git("commit", "--no-verify", "-m", "secret fixture snapshot")
 
         result = self._run_hook("pre-push")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        snapshot = self._git("show", "HEAD:initrd/debian/netinst/preseed.env").stdout
+        snapshot = self._git("show", "HEAD:initrd/debian/netinst/desktop/preseed.env").stdout
         self.assertIn(secret_value, snapshot)
         self.assertIn(
             "PRESEED_CF_ACCESS_KEY=''",
@@ -386,6 +386,40 @@ class GitSecretHookTests(unittest.TestCase):
             {name: path.read_bytes() for name, path in installed_paths.items()},
             before,
         )
+
+
+    def test_hook_removal_is_idempotent_and_preserves_unrelated_hooks(self) -> None:
+        installer = str(self.repo / "scripts/install-git-hooks.sh")
+        def run(action: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run([installer, action], cwd=self.repo, text=True, encoding="utf-8", capture_output=True)
+        self.assertEqual(run("--install").returncode, 0)
+        unrelated = self.repo / ".git/hooks/post-commit"
+        unrelated.write_text("#!/bin/sh\necho user-hook\n", encoding="utf-8")
+        self.assertEqual(run("--remove").returncode, 0)
+        for name in ("pre-commit", "pre-push"):
+            self.assertFalse((self.repo / ".git/hooks" / name).exists())
+            self.assertTrue((self.repo / ".githooks" / name).exists())
+        self.assertEqual(run("--remove").returncode, 0)
+        self.assertTrue(unrelated.exists())
+        self.assertEqual(run("--install").returncode, 0)
+        replaced = self.repo / ".git/hooks/pre-push"
+        replaced.write_text("#!/bin/sh\necho user-replacement\n", encoding="utf-8")
+        result = run("--remove")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("user-replacement", replaced.read_text(encoding="utf-8"))
+
+    def test_make_install_and_nuke_invoke_hook_lifecycle(self) -> None:
+        shutil.copy2(ROOT / "Makefile", self.repo / "Makefile")
+        # Override only prerequisites in this disposable repository. The actual
+        # Makefile recipes run against a no-op staged-host fixture, not the host.
+        (self.repo / "fixture.mk").write_text("guard-non-root:\n\t@:\nbuild:\n\t@:\n", encoding="utf-8")
+        (self.repo / "scripts/make-host.sh").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        for target, present in (("install", True), ("nuke", False)):
+            result = subprocess.run(["make", "-f", "Makefile", "-f", "fixture.mk", target,
+                "DESTDIR=" + str(self.repo / "stage")], cwd=self.repo, text=True, encoding="utf-8", capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for name in ("pre-commit", "pre-push"):
+                self.assertEqual((self.repo / ".git/hooks" / name).exists(), present)
 
 
 if __name__ == "__main__":

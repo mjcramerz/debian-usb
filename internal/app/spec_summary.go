@@ -145,6 +145,9 @@ func singleUSBLayoutSummary(plan CreatePlan, device Device) string {
 		return fmt.Sprintf("direct hybrid image: dd ISO -> %s whole disk; no partition target", blankIfEmpty(device.Path, "<unknown>"))
 	}
 	if singleUsesSharedISOStoreLayout(plan) {
+		if splitInstallerProfile(plan.Profile, plan.SourceRole) {
+			return fmt.Sprintf("GPT: p3 BIOSBOOT 1-3MiB | p1 ESP FAT32 %s 3-515MiB | p2 %s ext4 515MiB-end | separate Desktop/Server boot assets and opt-in preseed folders", espLabel, payloadFSLabel)
+		}
 		return fmt.Sprintf("GPT: BIOSBOOT 1-3MiB | ESP FAT32 %s 3-515MiB | %s ext4 515MiB-end | payload=/boot/iso + /boot assets", espLabel, payloadFSLabel)
 	}
 	layout := fmt.Sprintf("GPT: ESP FAT32 %s first 512MiB | managed payload ext4 %s", espLabel, payloadFSLabel)
@@ -245,6 +248,9 @@ func singleAutomationSummary(plan CreatePlan) string {
 	if plan.Preseed {
 		preseed = "http+usb"
 	}
+	if splitInstallerProfile(plan.Profile, plan.SourceRole) {
+		preseed = "Desktop/Server: https+http+initrd+usb; HD-MEDIA " + hdMediaPreseedSummary(plan.HDMediaPreseedDirs)
+	}
 	if plan.PreseedURL != "" {
 		preseed += " url=" + plan.PreseedURL
 	}
@@ -332,6 +338,9 @@ func multiOSSourceSummary(plan MultiOSPlan) string {
 		if item.Preseed {
 			preseed = "http+usb"
 		}
+		if splitInstallerProfile(item.Profile, item.SourceRole) {
+			preseed = "Desktop/Server:https+http+initrd+usb"
+		}
 		parts = append(parts, fmt.Sprintf("%s[%s,%s,%s,preseed=%s]=%s", item.Title, blankIfEmpty(item.SourceRole, multiOSSourceRolePrimary), blankIfEmpty(item.MediaClass, "<unknown>"), managedPayloadLayoutLabel(item.ManagedPayloadLayout), preseed, item.ISOPath))
 	}
 	total := "<unknown>"
@@ -345,9 +354,13 @@ func multiOSAutomationSummary(plan MultiOSPlan) string {
 	preseed := make([]string, 0)
 	persistence := make([]string, 0)
 	liveTools := make([]string, 0)
+	hdMedia := make([]string, 0)
 	for _, item := range plan.Items {
-		if item.Preseed {
+		if item.Preseed || splitInstallerProfile(item.Profile, item.SourceRole) {
 			preseed = append(preseed, item.Title)
+		}
+		if splitInstallerProfile(item.Profile, item.SourceRole) {
+			hdMedia = append(hdMedia, item.Title+": "+hdMediaPreseedSummary(item.HDMediaPreseedDirs))
 		}
 		if item.Persistence {
 			persistence = append(persistence, fmt.Sprintf("%s:%s %dGiB", item.Title, blankIfEmpty(item.PersistenceMode, persistenceModePlain), item.PersistenceSizeGiB))
@@ -363,6 +376,11 @@ func multiOSAutomationSummary(plan MultiOSPlan) string {
 		"default_preseed_sources=PRESEED_HOST_{DEBIAN,KALI,PURPLE}_PATH",
 		"preseed_stage=dirname(PRESEED_USB_*_FILE)",
 		"payloads=" + mapBoolLabel(multiOSUsesSharedISOStoreLayout(plan), "ISO store on p2", "raw-iso partitions per source"),
+	}
+	if len(hdMedia) > 0 {
+		parts[3] = "installer_preseed_sources=explicit consent only (HOST paths are prompt defaults)"
+		parts[4] = "installer_preseed_stage=p2:/<distro>-preseed-{de,srv}"
+		parts = append(parts, "HD-MEDIA="+strings.Join(hdMedia, "; "))
 	}
 	if len(liveTools) > 0 {
 		parts = append(parts, "live_tools="+compactStringList(liveTools, 4))
@@ -421,6 +439,9 @@ func singleISOManifestRows(plan CreatePlan) []infoRow {
 	if plan.OfflinePreseedSourceDir != "" {
 		rows = append(rows, infoRow{Label: "Offline preseed dir", Value: plan.OfflinePreseedSourceDir})
 	}
+	if splitInstallerProfile(plan.Profile, plan.SourceRole) {
+		rows = append(rows, infoRow{Label: "HD-MEDIA copying", Value: hdMediaPreseedSummary(plan.HDMediaPreseedDirs)})
+	}
 	return rows
 }
 
@@ -430,6 +451,9 @@ func multiOSISOManifestRows(plan MultiOSPlan) []infoRow {
 		preseed := "0"
 		if item.Preseed {
 			preseed = "online=1 offline=1"
+		}
+		if splitInstallerProfile(item.Profile, item.SourceRole) {
+			preseed = "Desktop/Server: https+http+initrd+usb"
 		}
 		value := fmt.Sprintf(
 			"id=%s | role=%s | profile=%s | media=%s | file=%s | size=%s | preseed=%s",
@@ -443,6 +467,9 @@ func multiOSISOManifestRows(plan MultiOSPlan) []infoRow {
 		)
 		if item.OfflinePreseedSourceDir != "" {
 			value += " | offline_preseed_dir=" + item.OfflinePreseedSourceDir
+		}
+		if splitInstallerProfile(item.Profile, item.SourceRole) {
+			value += " | HD-MEDIA=" + hdMediaPreseedSummary(item.HDMediaPreseedDirs)
 		}
 		rows = append(rows, infoRow{Label: item.Title, Value: value})
 	}
@@ -471,6 +498,13 @@ func singlePartitionSpecificationRows(plan CreatePlan, device Device) []infoRow 
 		}
 	}
 	if singleUsesSharedISOStoreLayout(plan) {
+		if splitInstallerProfile(plan.Profile, plan.SourceRole) {
+			return []infoRow{
+				{Label: "p1 ESP", Value: "number=1 | start_mib=3 | end_mib=<3+runtime-ESP-size> | fs=vfat | label=" + createPlanESPLabel(plan)},
+				{Label: "p2 DATA", Value: "number=2 | start_mib=<after-ESP> | end_mib=<device-end> | fs=ext4 | label=" + payloadFSLabel + " | Desktop/Server installer assets and optional full preseed trees"},
+				{Label: "p3 BIOSBOOT", Value: "number=3 | start_mib=1 | end_mib=3 | role=BIOS GRUB core"},
+			}
+		}
 		return sharedISOStorePartitionSpecificationRows(device, "single", createPlanESPLabel(plan), payloadFSLabel)
 	}
 	deviceMiB := bytesToMiB(device.SizeBytes)

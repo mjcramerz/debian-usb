@@ -123,7 +123,7 @@ class BuildISOTests(unittest.TestCase):
         self.assertIn("live-config.hooks=medium", result["plan"]["bootappend_live"].split())
         self.assertEqual(
             result["plan"]["live_tool_profile"]["package_count"],
-            len(result["plan"]["storage_tool_packages"]),
+            len(result["plan"]["storage_tool_packages"]) + len(result["plan"]["optional_live_packages"]),
         )
 
     def test_live_build_without_debian_installer_still_adds_live_administration_tools(self) -> None:
@@ -136,7 +136,7 @@ class BuildISOTests(unittest.TestCase):
         self.assertIn("nmap", result["storage_tool_packages"])
         self.assertEqual(
             result["live_tool_profile"]["package_count"],
-            len(result["storage_tool_packages"]),
+            len(result["storage_tool_packages"]) + len(result["optional_live_packages"]),
         )
 
     def test_live_build_accepts_selected_tool_groups(self) -> None:

@@ -407,6 +407,7 @@ def prepare_managed_installer_source(
         bundle_root / "isolinux",
         bundle_root / "EFI",
         bundle_root / "managed-installer-source.json",
+        bundle_root / ".debian-usb" / "installer-profiles",
     ):
         if stale_path.is_dir() and not stale_path.is_symlink():
             shutil.rmtree(stale_path)
@@ -435,6 +436,14 @@ def prepare_managed_installer_source(
     preseed_manifest: dict[str, Any] | None = None
     iso_scan_selection_manifest: dict[str, Any] | None = None
     with _InstallerInitrdSession(Path(bundled_initrd)) as session:
+        if profile in {"debian", "kali-linux"}:
+            from .installer_preseed import inspect_preseed_loader
+            _status("Checking installer preseed startup compatibility before module preparation.")
+            try:
+                native_loader = inspect_preseed_loader(session.tree())
+            except (OSError, ValueError) as exc:
+                raise ValueError(f"{profile} {source_role}: {exc}") from exc
+            _status(f"Installer preseed loader: {native_loader.hook_guest} ({native_loader.origin}).")
         if selected_extra_modules:
             _status("Selected modules: " + ", ".join(selected_extra_modules))
             _status("Selected strategy: " + _module_source_strategy_label(normalized_module_source_strategy))
@@ -448,7 +457,7 @@ def prepare_managed_installer_source(
             )
         else:
             _clear_existing_initrd_rebuild_manifest(bundle_root)
-        if resolved_overlay_dir is not None:
+        if resolved_overlay_dir is not None and profile not in {"debian", "kali-linux"}:
             overlay_manifest = _embed_initrd_overlay_into_initrd(
                 initrd_path=Path(bundled_initrd),
                 overlay_dir=resolved_overlay_dir,
@@ -457,7 +466,7 @@ def prepare_managed_installer_source(
             )
         else:
             _clear_existing_initrd_overlay_manifest(bundle_root)
-        if resolved_preseed_path is not None:
+        if resolved_preseed_path is not None and profile not in {"debian", "kali-linux"}:
             preseed_manifest = _embed_repo_preseed_into_initrd(
                 initrd_path=Path(bundled_initrd),
                 preseed_path=resolved_preseed_path,
@@ -473,6 +482,20 @@ def prepare_managed_installer_source(
                 bundle_root=bundle_root,
                 session=session,
             )
+    installer_profiles: dict[str, Any] = {}
+    if profile in {"debian", "kali-linux"}:
+        from .installer_profiles import prepare_installer_profiles
+        _status("Preparing isolated Desktop and Server installer archives.")
+        installer_profiles = prepare_installer_profiles(
+            bundle_root, profile, source_role,
+            overlay_root=resolved_overlay_dir, desktop_preseed=resolved_preseed_path,
+        )
+        for flavor, prepared in installer_profiles.items():
+            transport = prepared["preseed_transport"]
+            _status(f"{flavor.title()} installer ready: {transport['hook']} "
+                    f"({transport['origin']}, transport v{transport['version']}).")
+        if resolved_overlay_dir is not None:
+            overlay_manifest = {"profiles": installer_profiles, "overlay_dir": str(resolved_overlay_dir)}
     bundled_iso = ""
     if iso_path:
         payload_dir = bundle_root / "payload"
@@ -483,7 +506,8 @@ def prepare_managed_installer_source(
     (efi_boot_dir / "bootx64.efi").write_bytes(b"")
     (efi_boot_dir / "grubx64.efi").write_bytes(b"")
     source_manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "installer_profiles": installer_profiles,
         "profile": profile,
         "source_role": source_role,
         "boot_method": asset_root,
@@ -501,6 +525,7 @@ def prepare_managed_installer_source(
         ),
         "initrd_overlay_included": bool(overlay_manifest),
         "initrd_overlay_manifest": (
+            "/.debian-usb/installer-profiles/manifest.json" if installer_profiles else
             "/.debian-usb/installer/initrd-overlay-manifest.json" if overlay_manifest else ""
         ),
     }

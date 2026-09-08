@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import sys
 
 from .build_iso import build_debian_iso, ensure_debian_build_deps, inspect_build_kernel_support, validate_build_iso_plan_file
@@ -40,6 +41,21 @@ from .rebuild_iso import (
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="debian-usb-python")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    hd_media_cmd = subparsers.add_parser("stage-hd-media-preseeds")
+    hd_media_cmd.add_argument("--config", default="")
+    hd_media_cmd.add_argument("--plan", default="")
+    hd_media_cmd.add_argument("--profile", default="")
+    hd_media_cmd.add_argument("--source-role", default="primary")
+    hd_media_cmd.add_argument("--desktop", default="")
+    hd_media_cmd.add_argument("--server", default="")
+    hd_media_cmd.add_argument("--target-root", default="")
+    for command in ("validate-installer-profiles", "prepare-installer-profiles", "ensure-installer-profiles"):
+        profile_cmd = subparsers.add_parser(command)
+        profile_cmd.add_argument("--source-path", required=True)
+        profile_cmd.add_argument("--profile", required=True)
+        profile_cmd.add_argument("--source-role", required=True)
+        profile_cmd.add_argument("--overlay-root", default="")
 
     inspect_iso_cmd = subparsers.add_parser("inspect-iso")
     inspect_iso_cmd.add_argument("--iso-path", dest="source_path", required=True)
@@ -233,6 +249,36 @@ def main(argv: list[str] | None = None) -> int:
             payload = list_devices()
         elif args.command == "download-managed-source":
             payload = download_managed_source(args.config, args.key, expected_url=args.expected_url)
+        elif args.command == "stage-hd-media-preseeds":
+            from .installer_profiles import stage_hd_media_preseeds
+            config_data = dict(load_config(args.config) if args.config else load_template_config())
+            if args.plan:
+                from .multios import load_multios_plan
+                items = load_multios_plan(args.plan)["items"]
+            else:
+                items = [{"profile": args.profile, "source_role": args.source_role,
+                          "hd_media_preseed_dirs": {"desktop": args.desktop, "server": args.server}}]
+            payload = stage_hd_media_preseeds(items, config_data, args.target_root)
+        elif args.command in {"validate-installer-profiles", "prepare-installer-profiles", "ensure-installer-profiles"}:
+            from .installer_profiles import prepare_installer_profiles, validate_installer_profile_assets, PROFILE_ASSET_DIR
+            root = Path(args.source_path).expanduser().resolve(strict=True)
+            if args.command == "validate-installer-profiles" or (
+                args.command == "ensure-installer-profiles" and (root / PROFILE_ASSET_DIR / "manifest.json").is_file()
+            ):
+                payload = validate_installer_profile_assets(str(root), args.profile, args.source_role)
+            else:
+                source_manifest = json.loads((root / "managed-installer-source.json").read_text(encoding="utf-8"))
+                if source_manifest.get("profile") != args.profile or source_manifest.get("source_role") != args.source_role:
+                    raise ValueError("prepared source identity does not match the selected installer role")
+                payload = prepare_installer_profiles(root, args.profile, args.source_role,
+                    overlay_root=Path(args.overlay_root).expanduser().resolve(strict=True) if args.overlay_root else None)
+                source_manifest["schema_version"] = 2
+                source_manifest["installer_profiles"] = payload
+                source_manifest["initrd_overlay_included"] = bool(args.overlay_root)
+                source_manifest["initrd_overlay_manifest"] = "/" + PROFILE_ASSET_DIR + "/manifest.json"
+                (root / "managed-installer-source.json").write_text(json.dumps(source_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                from .installer_sources import _finalize_bundle_access
+                _finalize_bundle_access(root)
         elif args.command == "prepare-managed-installer-source":
             payload = prepare_managed_installer_source(
                 args.profile,

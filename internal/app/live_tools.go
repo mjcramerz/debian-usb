@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	liveToolCatalogSchemaVersion = 2
+	liveToolCatalogSchemaVersion = 3
 	liveToolCatalogMaxBytes      = 1024 * 1024
 	liveToolCatalogEnv           = "DEBIAN_USB_LIVE_TOOL_PROFILE"
 )
@@ -27,17 +27,20 @@ type liveToolPackageGroup struct {
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
 	Packages    []string `json:"packages"`
+	Profiles    []string `json:"profiles,omitempty"`
 }
 
 type liveToolCatalog struct {
-	SchemaVersion     int                    `json:"schema_version"`
-	Name              string                 `json:"name"`
-	Description       string                 `json:"description"`
-	SupportedProfiles []string               `json:"supported_profiles"`
-	BuildDistros      map[string]string      `json:"build_distros"`
-	PackageGroups     []liveToolPackageGroup `json:"package_groups"`
-	CommandPackages   map[string]string      `json:"command_packages"`
-	Notes             []string               `json:"notes"`
+	SchemaVersion     int                            `json:"schema_version"`
+	Name              string                         `json:"name"`
+	Description       string                         `json:"description"`
+	SupportedProfiles []string                       `json:"supported_profiles"`
+	BuildDistros      map[string]string              `json:"build_distros"`
+	PackageGroups     []liveToolPackageGroup         `json:"package_groups"`
+	CommandPackages   map[string]string              `json:"command_packages"`
+	ProfileAdditions  map[string]map[string][]string `json:"profile_additions"`
+	OptionalPackages  map[string][]string            `json:"optional_packages"`
+	Notes             []string                       `json:"notes"`
 
 	path string
 }
@@ -99,7 +102,7 @@ func resolveLiveToolCatalogPath() (string, error) {
 
 func validateLiveToolCatalog(catalog liveToolCatalog) error {
 	if catalog.SchemaVersion != liveToolCatalogSchemaVersion {
-		return fmt.Errorf("schema_version must be %d", liveToolCatalogSchemaVersion)
+		return fmt.Errorf("schema_version must be %d; replace the legacy catalog with the shipped profile-scoped admin-tools.json (wireless penetration-testing tools are Kali Live only)", liveToolCatalogSchemaVersion)
 	}
 	if strings.TrimSpace(catalog.Name) == "" {
 		return fmt.Errorf("name must not be empty")
@@ -138,6 +141,21 @@ func validateLiveToolCatalog(catalog liveToolCatalog) error {
 			return fmt.Errorf("duplicate package group id: %s", group.ID)
 		}
 		seenGroups[group.ID] = struct{}{}
+		if group.Profiles != nil {
+			if len(group.Profiles) == 0 {
+				return fmt.Errorf("package group %s profiles must not be empty", group.ID)
+			}
+			seenProfiles := make(map[string]bool)
+			for _, profile := range group.Profiles {
+				if _, exists := supportedProfiles[profile]; !exists || seenProfiles[profile] {
+					return fmt.Errorf("invalid or duplicate profile for package group %s: %s", group.ID, profile)
+				}
+				seenProfiles[profile] = true
+			}
+		}
+		if group.ID == "wireless_security" && (len(group.Profiles) != 1 || group.Profiles[0] != profileKaliLinux) {
+			return fmt.Errorf("wireless_security must be scoped to Kali Live only (profiles: [kali-linux])")
+		}
 		if strings.TrimSpace(group.Title) == "" || strings.TrimSpace(group.Description) == "" {
 			return fmt.Errorf("package group %s requires a title and description", group.ID)
 		}
@@ -154,6 +172,45 @@ func validateLiveToolCatalog(catalog liveToolCatalog) error {
 			}
 			groupPackages[packageName] = struct{}{}
 			seenPackages[packageName] = struct{}{}
+		}
+	}
+	for profile, additions := range catalog.ProfileAdditions {
+		if _, ok := supportedProfiles[profile]; !ok {
+			return fmt.Errorf("profile_additions references unsupported profile: %s", profile)
+		}
+		for groupID, packages := range additions {
+			if _, ok := seenGroups[groupID]; !ok {
+				return fmt.Errorf("profile_additions references unknown group: %s", groupID)
+			}
+			for _, group := range catalog.PackageGroups {
+				if group.ID == groupID && !group.supportsProfile(profile) {
+					return fmt.Errorf("profile_additions group %s is not available for profile: %s", groupID, profile)
+				}
+			}
+			for _, packageName := range packages {
+				if !liveToolPackagePattern.MatchString(packageName) {
+					return fmt.Errorf("invalid profile-specific package: %s", packageName)
+				}
+			}
+		}
+	}
+	for profile, packages := range catalog.OptionalPackages {
+		if _, ok := supportedProfiles[profile]; !ok {
+			return fmt.Errorf("optional_packages references unsupported profile: %s", profile)
+		}
+		available := make(map[string]bool)
+		for _, group := range catalog.forProfile(profile).PackageGroups {
+			for _, packageName := range group.Packages {
+				available[packageName] = true
+			}
+		}
+		for _, packageName := range packages {
+			if !liveToolPackagePattern.MatchString(packageName) {
+				return fmt.Errorf("invalid optional package: %s", packageName)
+			}
+			if !available[packageName] {
+				return fmt.Errorf("optional_packages references package %s unavailable for profile: %s", packageName, profile)
+			}
 		}
 	}
 	if len(catalog.CommandPackages) == 0 {
@@ -177,6 +234,54 @@ func (catalog liveToolCatalog) supportsProfile(profile string) bool {
 		}
 	}
 	return false
+}
+
+func (group liveToolPackageGroup) supportsProfile(profile string) bool {
+	if group.Profiles == nil {
+		return true
+	}
+	for _, supported := range group.Profiles {
+		if profile == supported {
+			return true
+		}
+	}
+	return false
+}
+
+// forProfile returns independent, scoped groups. Filter before expanding All
+// so Kali's wireless tools cannot enter Debian menus, plans or package counts.
+func (catalog liveToolCatalog) forProfile(profile string) liveToolCatalog {
+	result := catalog
+	result.PackageGroups = make([]liveToolPackageGroup, 0, len(catalog.PackageGroups))
+	availablePackages := make(map[string]bool)
+	for _, group := range catalog.PackageGroups {
+		if !catalog.supportsProfile(profile) || !group.supportsProfile(profile) {
+			continue
+		}
+		group.Packages = append([]string(nil), group.Packages...)
+		group.Profiles = append([]string(nil), group.Profiles...)
+		seen := make(map[string]bool, len(group.Packages))
+		for _, name := range group.Packages {
+			seen[name] = true
+		}
+		for _, name := range catalog.ProfileAdditions[profile][group.ID] {
+			if !seen[name] {
+				group.Packages = append(group.Packages, name)
+				seen[name] = true
+			}
+		}
+		for _, name := range group.Packages {
+			availablePackages[name] = true
+		}
+		result.PackageGroups = append(result.PackageGroups, group)
+	}
+	result.CommandPackages = make(map[string]string)
+	for command, packageName := range catalog.CommandPackages {
+		if availablePackages[packageName] {
+			result.CommandPackages[command] = packageName
+		}
+	}
+	return result
 }
 
 func (catalog liveToolCatalog) allGroupIDs() []string {
@@ -226,7 +331,14 @@ func validateLiveToolGroupSelection(profile string, groups []string) ([]string, 
 		}
 		return nil, fmt.Errorf("Live administration tool selection is not supported for profile: %s", profile)
 	}
-	return catalog.normalizeGroupSelection(groups)
+	for _, requested := range groups {
+		for _, group := range catalog.PackageGroups {
+			if group.ID == strings.TrimSpace(requested) && !group.supportsProfile(profile) {
+				return nil, fmt.Errorf("Live tool group %s is unavailable for profile %s (available only for: %s); remove it from this profile's saved plan", group.ID, profile, strings.Join(group.Profiles, ", "))
+			}
+		}
+	}
+	return catalog.forProfile(profile).normalizeGroupSelection(groups)
 }
 
 func (a *App) promptLiveToolGroups(profile string, current []string) ([]string, menuAction, error) {
@@ -237,6 +349,8 @@ func (a *App) promptLiveToolGroups(profile string, current []string) ([]string, 
 	if !catalog.supportsProfile(profile) {
 		return nil, menuStay, nil
 	}
+
+	catalog = catalog.forProfile(profile)
 
 	currentGroups := current
 	if currentGroups == nil {
@@ -270,7 +384,7 @@ func (a *App) promptLiveToolGroups(profile string, current []string) ([]string, 
 		a.printMenu(
 			menuEntry{Key: "s", Label: "Select Tools", Detail: "Choose individual Live tool groups"},
 			menuEntry{Key: "n", Label: "None", Detail: "Add no optional Live administration tools"},
-			menuEntry{Key: "a", Label: "All", Detail: "Include every Live tool group"},
+			menuEntry{Key: "a", Label: "All", Detail: "Include every Live tool group available for this profile"},
 			menuEntry{Key: "b", Label: "Go Back"},
 			menuEntry{Key: "e", Label: "Exit"},
 		)

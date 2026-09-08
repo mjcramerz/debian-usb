@@ -1,3 +1,4 @@
+from installer_fixture import write_installer_initrd
 from pathlib import Path
 import json
 import os
@@ -131,11 +132,11 @@ class BootConfigTests(unittest.TestCase):
         )
 
         with_url = _set_installer_seed_transport(kernel_args, url="https://example.test/preseed.cfg")
-        with_file = _set_installer_seed_transport(kernel_args, seed_file="/hd-media/preseed/debian/preseed.cfg")
+        with_file = _set_installer_seed_transport(kernel_args, seed_file="/hd-media/debian-preseed-de/preseed.cfg")
         without_seed = _set_installer_seed_transport(kernel_args)
 
         self.assertEqual(_seed_transport_tokens(with_url), ["url=https://example.test/preseed.cfg"])
-        self.assertEqual(_seed_transport_tokens(with_file), ["file=/hd-media/preseed/debian/preseed.cfg"])
+        self.assertEqual(_seed_transport_tokens(with_file), ["file=/hd-media/debian-preseed-de/preseed.cfg"])
         self.assertEqual(_seed_transport_tokens(without_seed), [])
         with self.assertRaisesRegex(ValueError, "exactly one"):
             _set_installer_seed_transport(kernel_args, url="https://example.test/preseed.cfg", seed_file="/preseed.cfg")
@@ -161,7 +162,7 @@ class BootConfigTests(unittest.TestCase):
                         )
                         self.assertEqual(
                             [network["args_key"] for network in entry["network_menus"]],
-                            ["DEBIAN_PRESEED_INTERNAL_ARGS", "DEBIAN_PRESEED_PUBLIC_ARGS"],
+                            ["DEBIAN_DE_PRESEED_INTERNAL_ARGS", "DEBIAN_DE_PRESEED_PUBLIC_ARGS"],
                         )
 
     def test_render_custom_main_menu_uses_family_and_static_entry_order(self) -> None:
@@ -625,7 +626,7 @@ menuentry 'Try Ubuntu' {
         config_data = dict(load_template_config())
         config_data["DEFAULT_INSTALLER_KERNEL_EXTRAS"] = "ipv6.disable=1"
         config_data["DEBIAN_INSTALLER_KERNEL_EXTRAS"] = "net.ifnames=0"
-        config_data["DEBIAN_PRESEED_INTERNAL_URL"] = "https://example.test/preseed.cfg"
+        config_data["DEBIAN_DE_PRESEED_INTERNAL_URL"] = "https://example.test/preseed.cfg"
         adapted = _adapt_entry_for_managed(entry, "debian", "dead-beef", config_data, "")
         self.assertIn("auto=true", adapted.kernel_args)
         self.assertEqual(_seed_transport_tokens(adapted.kernel_args), ["url=https://example.test/preseed.cfg"])
@@ -778,16 +779,11 @@ label live
                 encoding="utf-8",
             )
 
-            resolved = resolve_live_boot(
-                root=str(root),
-                profile="tails",
-                live_uuid="TAILS-UUID",
-                persistence=True,
-            )
-
-            self.assertEqual(resolved["persistence_fs_label"], "TailsData")
-            for fragment in ("persistence", "persistent=cryptsetup", "persistence-label=", "persistence-media="):
-                self.assertNotIn(fragment, resolved["kernel_args"])
+            with self.assertRaisesRegex(ValueError, "Tails native Persistent Storage"):
+                resolve_live_boot(root=str(root), profile="tails", live_uuid="TAILS-UUID", persistence=True)
+            resolved = resolve_live_boot(root=str(root), profile="tails", live_uuid="TAILS-UUID", persistence=False)
+            self.assertIn("nopersistence", resolved["kernel_args"].split())
+            self.assertNotIn("persistence", resolved["kernel_args"].split())
 
     def test_resolve_live_boot_replaces_ubuntu_ignore_uuid_with_live_uuid(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -916,7 +912,7 @@ label live
                         "preseed/url=https://legacy.example.test/preseed.cfg "
                         "file/preseed=/legacy/preseed.cfg"
                     ),
-                    "DEBIAN_PRESEED_INTERNAL_URL": "https://example.test/preseed.cfg",
+                    "DEBIAN_DE_PRESEED_INTERNAL_URL": "http://example.test/preseed.cfg",
                 },
             )
             (root / "boot/grub").mkdir(parents=True)
@@ -942,7 +938,7 @@ menuentry 'Install' {
             kernel_args = resolved["kernel_args"]
             for token in ("vga=788", "auto=true", "priority=critical", "interface=auto", "---"):
                 self.assertIn(token, kernel_args)
-            self.assertEqual(_seed_transport_tokens(kernel_args), ["url=https://example.test/preseed.cfg"])
+            self.assertEqual(_seed_transport_tokens(kernel_args), ["url=http://example.test/preseed.cfg"])
 
     def test_render_managed_grub_preserves_repeated_keyed_args_from_debian_preseed_common_args(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -952,8 +948,8 @@ menuentry 'Install' {
                 str(config_path),
                 {
                     "PRESEED_COMMON_KERNEL_ARGS": "priority=critical video=HDMI-1:e:1920x1080@60 video=eDP-1:e:1920x1080@60",
-                    "PRESEED_ONE_ARGS_DEBIAN": "classes=prod\\;desktop\\;amd64\\;intel\\;baremetal\\;intel-uhd\\;enhanced\\;dhcp\\;nvme",
-                    "DEBIAN_PRESEED_INTERNAL_URL": "https://example.test/preseed.cfg",
+                    "PRESEED_ONE_ARGS_DEBIAN_DE": "classes=prod\\;desktop\\;amd64\\;intel\\;baremetal\\;intel-uhd\\;enhanced\\;dhcp\\;nvme",
+                    "DEBIAN_DE_PRESEED_INTERNAL_URL": "http://example.test/preseed.cfg",
                 },
             )
             (root / "EFI/boot").mkdir(parents=True)
@@ -991,11 +987,11 @@ menuentry '... Expert install' {
                 entry
                 for entry in entries
                 if entry.menu_path
-                == ("Debian ...", "Debian Netinst ...", "Debian Netinst Install (HTTP Preseed) ...", "Preseed Internal ...")
+                == ("Debian ...", "Debian Netinst ...", "DEBIAN DESKTOP", "Debian Netinst Install (HTTP LAN) ...")
             )
             self.assertIn("priority=critical", online_preset.kernel_args)
             self.assertNotIn("priority=low", online_preset.kernel_args)
-            self.assertEqual(_seed_transport_tokens(online_preset.kernel_args), ["url=https://example.test/preseed.cfg"])
+            self.assertEqual(_seed_transport_tokens(online_preset.kernel_args), ["url=http://example.test/preseed.cfg"])
             self.assertIn("classes=prod\\;desktop\\;amd64\\;intel\\;baremetal\\;intel-uhd\\;enhanced\\;dhcp\\;nvme", online_preset.kernel_args)
 
     def test_render_managed_grub_uses_internal_and_public_preseed_urls_per_variant_menu(self) -> None:
@@ -1005,12 +1001,12 @@ menuentry '... Expert install' {
             save_config(
                 str(config_path),
                 {
-                    "PRESEED_ONE_ARGS_DEBIAN": "classes=prod\\;desktop\\;standard\\;dhcp;nvidia",
-                    "PRESEED_TWO_ARGS_DEBIAN": "netcfg/get_ipaddress=10.0.0.10 classes=prod\\;desktop\\;standard\\;static",
-                    "DEBIAN_PRESEED_INTERNAL_URL": "https://example.test/internal-preseed.cfg",
-                    "DEBIAN_PRESEED_PUBLIC_URL": "https://example.test/public-preseed.cfg",
-                    "DEBIAN_PRESEED_INTERNAL_ARGS": "internal-only=1",
-                    "DEBIAN_PRESEED_PUBLIC_ARGS": (
+                    "PRESEED_ONE_ARGS_DEBIAN_DE": "classes=prod\\;desktop\\;standard\\;dhcp;nvidia",
+                    "PRESEED_TWO_ARGS_DEBIAN_DE": "netcfg/get_ipaddress=10.0.0.10 classes=prod\\;desktop\\;standard\\;static",
+                    "DEBIAN_DE_PRESEED_INTERNAL_URL": "http://example.test/internal-preseed.cfg",
+                    "DEBIAN_DE_PRESEED_PUBLIC_URL": "https://example.test/public-preseed.cfg",
+                    "DEBIAN_DE_PRESEED_INTERNAL_ARGS": "internal-only=1",
+                    "DEBIAN_DE_PRESEED_PUBLIC_ARGS": (
                         "debian-installer/allow_unauthenticated_ssl=true public-only=1 "
                         "url=https://ignored.example.test/preseed.cfg file=/ignored/preseed.cfg"
                     ),
@@ -1046,37 +1042,37 @@ menuentry 'Install' {
                 entry
                 for entry in entries
                 if entry.menu_path
-                == ("Debian ...", "Debian Netinst ...", "Debian Netinst Install (HTTP Preseed) ...", "Preseed Internal ...")
+                == ("Debian ...", "Debian Netinst ...", "DEBIAN DESKTOP", "Debian Netinst Install (HTTP LAN) ...")
             )
             public_preset = next(
                 entry
                 for entry in entries
                 if entry.menu_path
-                == ("Debian ...", "Debian Netinst ...", "Debian Netinst Install (HTTP Preseed) ...", "Preseed Public ...")
+                == ("Debian ...", "Debian Netinst ...", "DEBIAN DESKTOP", "Debian Netinst Install (HTTPS WEB) ...")
             )
             static_preset = next(
                 entry
                 for entry in entries
                 if entry.menu_path
-                == ("Debian ...", "Debian Netinst ...", "Debian Netinst Install (HTTP Preseed) ...", "Preseed Internal ...")
+                == ("Debian ...", "Debian Netinst ...", "DEBIAN DESKTOP", "Debian Netinst Install (HTTP LAN) ...")
                 and "netcfg/get_ipaddress=10.0.0.10" in entry.kernel_args
             )
             offline_internal_preset = next(
                 entry
                 for entry in entries
                 if entry.menu_path
-                == ("Debian ...", "Debian Netinst ...", "Debian Netinst Install (USB Preseed) ...", "Preseed Internal ...")
+                == ("Debian ...", "Debian Netinst ...", "DEBIAN DESKTOP", "Debian Netinst Install (USB HD-MEDIA) ...")
             )
             offline_public_preset = next(
                 entry
                 for entry in entries
                 if entry.menu_path
-                == ("Debian ...", "Debian Netinst ...", "Debian Netinst Install (USB Preseed) ...", "Preseed Public ...")
+                == ("Debian ...", "Debian Netinst ...", "DEBIAN DESKTOP", "Debian Netinst Install (INITRD PRESEED) ...")
             )
 
             self.assertEqual(
                 _seed_transport_tokens(internal_preset.kernel_args),
-                ["url=https://example.test/internal-preseed.cfg"],
+                ["url=http://example.test/internal-preseed.cfg"],
             )
             self.assertEqual(
                 _seed_transport_tokens(public_preset.kernel_args),
@@ -1084,22 +1080,25 @@ menuentry 'Install' {
             )
             self.assertEqual(
                 _seed_transport_tokens(offline_internal_preset.kernel_args),
-                ["file=/hd-media/preseed/debian/preseed.cfg"],
+                ["file=/hd-media/debian-preseed-de/preseed.cfg"],
             )
             self.assertEqual(
                 _seed_transport_tokens(offline_public_preset.kernel_args),
-                ["url=https://example.test/public-preseed.cfg"],
+                [],
             )
-            for entry in (internal_preset, offline_internal_preset):
+            for entry in (internal_preset,):
                 tokens = _pre_separator_tokens(entry.kernel_args)
                 self.assertIn("internal-only=1", tokens)
                 self.assertNotIn("debian-installer/allow_unauthenticated_ssl=true", tokens)
                 self.assertNotIn("public-only=1", tokens)
-            for entry in (public_preset, offline_public_preset):
+            for entry in (public_preset,):
                 tokens = _pre_separator_tokens(entry.kernel_args)
                 self.assertIn("debian-installer/allow_unauthenticated_ssl=true", tokens)
                 self.assertIn("public-only=1", tokens)
                 self.assertNotIn("internal-only=1", tokens)
+            for entry in (offline_internal_preset, offline_public_preset):
+                self.assertNotIn("internal-only=1", entry.kernel_args)
+                self.assertNotIn("public-only=1", entry.kernel_args)
             internal_tokens = _pre_separator_tokens(internal_preset.kernel_args)
             public_tokens = _pre_separator_tokens(public_preset.kernel_args)
             static_tokens = _pre_separator_tokens(static_preset.kernel_args)
@@ -1115,7 +1114,7 @@ menuentry 'Install' {
             shutil.copytree("configs/spec/grub", spec_dir)
             debian_spec_path = spec_dir / "debian.json"
             debian_spec = json.loads(debian_spec_path.read_text(encoding="utf-8"))
-            debian_spec["preseed"]["preset_sets"]["debian"].append(
+            debian_spec["preseed"]["preset_sets"]["debian-de"].append(
                 {
                     "label": " (ROLE=TEST,GPU=Nvidia,NET=DHCP,BOOT=Dualboot)",
                     "args_key": "PRESEED_ELEVEN_ARGS_DEBIAN",
@@ -1128,7 +1127,7 @@ menuentry 'Install' {
                 str(config_path),
                 {
                     "PRESEED_ELEVEN_ARGS_DEBIAN": "classes=prod\\;test\\;dhcp\\;dualboot",
-                    "DEBIAN_PRESEED_INTERNAL_URL": "https://example.test/preseed.cfg",
+                    "DEBIAN_DE_PRESEED_INTERNAL_URL": "http://example.test/preseed.cfg",
                 },
             )
             (root / "EFI/boot").mkdir(parents=True)
@@ -1165,12 +1164,11 @@ menuentry 'Install' {
                 == (
                     "Debian ...",
                     "Debian Netinst ...",
-                    "Debian Netinst Install (HTTP Preseed) ...",
-                    "Preseed Internal ...",
+                    "DEBIAN DESKTOP", "Debian Netinst Install (HTTP LAN) ...",
                 )
             )
             self.assertIn("classes=prod\\;test\\;dhcp\\;dualboot", added_entry.kernel_args)
-            self.assertIn("url=https://example.test/preseed.cfg", added_entry.kernel_args)
+            self.assertIn("url=http://example.test/preseed.cfg", added_entry.kernel_args)
 
     def test_render_managed_grub_omits_removed_preseed_preset_from_spec(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1181,18 +1179,18 @@ menuentry 'Install' {
             debian_spec = json.loads(debian_spec_path.read_text(encoding="utf-8"))
             removed_label = next(
                 preset["label"]
-                for preset in debian_spec["preseed"]["preset_sets"]["debian"]
-                if preset["args_key"] == "PRESEED_ONE_ARGS_DEBIAN"
+                for preset in debian_spec["preseed"]["preset_sets"]["debian-de"]
+                if preset["args_key"] == "PRESEED_ONE_ARGS_DEBIAN_DE"
             )
             retained_label = next(
                 preset["label"]
-                for preset in debian_spec["preseed"]["preset_sets"]["debian"]
-                if preset["args_key"] == "PRESEED_THREE_ARGS_DEBIAN"
+                for preset in debian_spec["preseed"]["preset_sets"]["debian-de"]
+                if preset["args_key"] == "PRESEED_THREE_ARGS_DEBIAN_DE"
             )
-            debian_spec["preseed"]["preset_sets"]["debian"] = [
+            debian_spec["preseed"]["preset_sets"]["debian-de"] = [
                 preset
-                for preset in debian_spec["preseed"]["preset_sets"]["debian"]
-                if preset["args_key"] != "PRESEED_ONE_ARGS_DEBIAN"
+                for preset in debian_spec["preseed"]["preset_sets"]["debian-de"]
+                if preset["args_key"] != "PRESEED_ONE_ARGS_DEBIAN_DE"
             ]
             debian_spec_path.write_text(json.dumps(debian_spec), encoding="utf-8")
 
@@ -1200,7 +1198,7 @@ menuentry 'Install' {
             save_config(
                 str(config_path),
                 {
-                    "DEBIAN_PRESEED_INTERNAL_URL": "https://example.test/preseed.cfg",
+                    "DEBIAN_DE_PRESEED_INTERNAL_URL": "http://example.test/preseed.cfg",
                 },
             )
             (root / "EFI/boot").mkdir(parents=True)
@@ -1317,7 +1315,7 @@ label live
         disabled_config["DEFAULT_LIVE_HOOKS"] = "0"
         disabled_config["DEFAULT_LIVE_ARGS_HOOKS"] = "live-config.hooks=filesystem"
         self.assertEqual(_live_hook_kernel_args(disabled_config, "debian"), "live-config.hooks=medium")
-        self.assertEqual(_live_hook_kernel_args(config_data, "kali-linux"), "")
+        self.assertEqual(_live_hook_kernel_args(config_data, "kali-linux"), _live_hook_kernel_args(config_data, "debian"))
         self.assertEqual(_live_hook_kernel_args(config_data, "tails"), "")
         self.assertEqual(_live_hook_kernel_args(config_data, "ubuntu-desktop"), "")
 
@@ -1537,10 +1535,10 @@ menuentry 'Automated install' {
                 entry
                 for entry in entries
                 if entry.menu_path
-                == ("Debian ...", "Debian Netinst ...", "Debian Netinst Install (HTTP Preseed) ...", "Preseed Internal ...")
+                == ("Debian ...", "Debian Netinst ...", "DEBIAN DESKTOP", "Debian Netinst Install (HTTP LAN) ...")
             )
-            self.assertEqual(online_preset.kernel_path, "/boot/debian/netinst/vmlinuz")
-            self.assertEqual(online_preset.initrd_path, "/boot/debian/netinst/initrd.gz")
+            self.assertEqual(online_preset.kernel_path, "/debian-netinst-de/vmlinuz")
+            self.assertEqual(online_preset.initrd_path, "/debian-netinst-de/initrd.gz")
             self.assertIn("source=text", online_preset.kernel_args)
             self.assertIn(
                 "iso-scan/filename=/boot/iso/debian/netinst/fixture-netinst.iso",
@@ -1670,113 +1668,24 @@ menuentry '... Rescue mode' {
             )
 
             grub_cfg = rendered["grub_cfg"]
-            self.assertIn('submenu "Debian ..."', grub_cfg)
-            self.assertIn('submenu "Debian Netinst ..."', grub_cfg)
-            self.assertIn('submenu "Debian Netinst Install (HTTP Preseed) ..."', grub_cfg)
-            self.assertIn('submenu "Debian Netinst Install (USB Preseed) ..."', grub_cfg)
-            self.assertIn('submenu "Preseed Internal ..."', grub_cfg)
-            self.assertIn('submenu "Preseed Public ..."', grub_cfg)
-            self.assertNotIn('menuentry "... Debian Netinst Install [Expert]"', grub_cfg)
-            self.assertNotIn('menuentry "Debian Live"', grub_cfg)
-
             entries = parse_grub_entries(grub_cfg, "boot/grub/grub.cfg")
-            default_title = "... Debian Netinst Install" + _repo_preset_label(
-                "debian", "debian", "PRESEED_ONE_ARGS_DEBIAN"
-            )
-            dualboot_title = "... Debian Netinst Install" + _repo_preset_label(
-                "debian", "debian", "PRESEED_THREE_ARGS_DEBIAN"
-            )
-            placeholder_title = "... Debian Netinst Install" + _repo_preset_label(
-                "debian", "debian", "PRESEED_EIGHT_ARGS_DEBIAN"
-            )
-            configured_interface = _template_kernel_arg("PRESEED_COMMON_KERNEL_ARGS", "interface")
-            public_url = load_template_config()["DEBIAN_PRESEED_PUBLIC_URL"]
-
-            legacy_install = next(
-                entry
-                for entry in entries
-                if entry.title == "... Debian Netinst Install"
-                and entry.menu_path == ("Debian ...", "Debian Legacy ...")
-            )
-            self.assertEqual(legacy_install.kernel_path, "/boot/debian/netinst/vmlinuz")
-            self.assertFalse(
-                any(
-                    entry.title == "... Debian Netinst Install"
-                    and entry.menu_path == ("Debian ...", "Debian Netinst ...")
-                    for entry in entries
-                )
-            )
-
-            online_preset = next(
-                entry
-                for entry in entries
-                if entry.title == default_title
-                and entry.menu_path
-                == (
-                    "Debian ...",
-                    "Debian Netinst ...",
-                    "Debian Netinst Install (HTTP Preseed) ...",
-                    "Preseed Internal ...",
-                )
-            )
-            self.assertEqual(online_preset.kernel_path, "/boot/debian/netinst/vmlinuz")
-            self.assertIn("iso-scan/filename=/boot/iso/debian/netinst/fixture-netinst.iso", online_preset.kernel_args)
-            self.assertNotIn("INSTALL_MEDIA_DEV=", online_preset.kernel_args)
-            self.assertIn("url=", online_preset.kernel_args)
-            self.assertIn(configured_interface, online_preset.kernel_args.split())
-
-            dualboot_preset = next(
-                entry
-                for entry in entries
-                if entry.title == dualboot_title
-                and entry.menu_path
-                == (
-                    "Debian ...",
-                    "Debian Netinst ...",
-                    "Debian Netinst Install (USB Preseed) ...",
-                    "Preseed Internal ...",
-                )
-            )
-            self.assertIn(
-                _grub_escaped_config_arg("PRESEED_THREE_ARGS_DEBIAN", "classes"),
-                dualboot_preset.kernel_args.split(),
-            )
-            self.assertIn("dualboot_efi=1", dualboot_preset.kernel_args.split())
-            self.assertIn("dualboot_debian=5", dualboot_preset.kernel_args.split())
-
-            offline_preset = next(
-                entry
-                for entry in entries
-                if entry.title == default_title
-                and entry.menu_path
-                == (
-                    "Debian ...",
-                    "Debian Netinst ...",
-                    "Debian Netinst Install (USB Preseed) ...",
-                    "Preseed Public ...",
-                )
-            )
-            self.assertEqual(offline_preset.kernel_path, "/boot/debian/netinst/vmlinuz")
-            self.assertEqual(_seed_transport_tokens(offline_preset.kernel_args), [f"url={public_url}"])
-
-            ssh_preset = next(
-                entry
-                for entry in entries
-                if entry.title == placeholder_title
-                and entry.menu_path
-                == (
-                    "Debian ...",
-                    "Debian Netinst ...",
-                    "Debian Netinst Install (USB Preseed) ...",
-                    "Preseed Internal ...",
-                )
-                and _grub_escaped_config_arg("PRESEED_EIGHT_ARGS_DEBIAN", "classes")
-                in entry.kernel_args.split()
-            )
-            self.assertIn(
-                _grub_escaped_config_arg("PRESEED_EIGHT_ARGS_DEBIAN", "classes"),
-                ssh_preset.kernel_args.split(),
-            )
+            for flavor, suffix in (("DESKTOP", "de"), ("SERVER", "srv")):
+                path = ("Debian ...", "Debian Netinst ...", "DEBIAN " + flavor)
+                for transport in ("HTTPS WEB", "HTTP LAN", "INITRD PRESEED", "USB HD-MEDIA"):
+                    selected = [entry for entry in entries if entry.menu_path == path + (f"Debian Netinst Install ({transport}) ...",)]
+                    self.assertTrue(selected, (flavor, transport))
+                    for entry in selected:
+                        if not entry.kernel_path:  # An unset URL is a disabled explanatory entry.
+                            self.assertTrue(entry.title.startswith("Not configured:"))
+                            continue
+                        self.assertEqual(entry.kernel_path, f"/debian-netinst-{suffix}/vmlinuz")
+                        self.assertEqual(entry.initrd_path, f"/debian-netinst-{suffix}/initrd.gz")
+                        self.assertIn("iso-scan/filename=", entry.kernel_args)
+                        if transport == "INITRD PRESEED":
+                            self.assertEqual(_seed_transport_tokens(entry.kernel_args), [])
+                        elif transport == "USB HD-MEDIA":
+                            self.assertEqual(_seed_transport_tokens(entry.kernel_args), [f"file=/hd-media/debian-preseed-{suffix}/preseed.cfg"])
+            self.assertFalse(any("Live Environment" in entry.title for entry in entries))
 
     def test_render_grub_entry_escapes_special_kernel_arg_characters(self) -> None:
         entry = BootEntry(
@@ -1886,66 +1795,24 @@ menuentry '... Rescue mode' {
             )
 
             grub_cfg = rendered["grub_cfg"]
-            self.assertIn('submenu "Kali ..."', grub_cfg)
-            self.assertIn('submenu "Kali Netinst ..."', grub_cfg)
-            self.assertIn('submenu "Kali Netinst Install (HTTP Preseed) ..."', grub_cfg)
-            self.assertIn('submenu "Kali Netinst Install (USB Preseed) ..."', grub_cfg)
-            self.assertIn('submenu "Preseed Internal ..."', grub_cfg)
-            self.assertIn('submenu "Preseed Public ..."', grub_cfg)
-            self.assertIn('menuentry "... Kali Netinst Install (ROLE=Desktop,GPU=Nvidia,NET=DHCP)"', grub_cfg)
-            self.assertIn('menuentry "... Kali Netinst Install"', grub_cfg)
-            self.assertIn('menuentry "... Kali Netinst Expert Install"', grub_cfg)
-            self.assertIn('menuentry "... Kali Netinst Rescue Environment"', grub_cfg)
-            self.assertNotIn('menuentry "... Kali Netinst Install (HTTP Preseed)"', grub_cfg)
-            self.assertNotIn('menuentry "... Kali Netinst Install (USB Preseed)"', grub_cfg)
-            self.assertNotIn('menuentry "Kali Installer (Offline Normal)"', grub_cfg)
-            self.assertNotIn('menuentry "Kali Live"', grub_cfg)
             entries = parse_grub_entries(grub_cfg, "boot/grub/grub.cfg")
-            configured_interface = _template_kernel_arg("PRESEED_COMMON_KERNEL_ARGS", "interface")
-            public_url = load_template_config()["DEBIAN_PRESEED_PUBLIC_URL"]
-            default_title = "... Kali Netinst Install" + _repo_preset_label(
-                "kali-linux", "kali", "PRESEED_ONE_ARGS_KALI"
-            )
-
-            online_preseed = next(
-                entry
-                for entry in entries
-                if entry.title == default_title
-                and entry.menu_path
-                == ("Kali ...", "Kali Netinst ...", "Kali Netinst Install (HTTP Preseed) ...", "Preseed Internal ...")
-            )
-            self.assertEqual(online_preseed.kernel_path, "/boot/kali/netinst/vmlinuz")
-            self.assertIn("iso-scan/filename=/boot/iso/kali/netinst/fixture-netinst.iso", online_preseed.kernel_args)
-            self.assertNotIn("INSTALL_MEDIA_DEV=", online_preseed.kernel_args)
-            self.assertIn("url=", online_preseed.kernel_args)
-            self.assertIn(configured_interface, online_preseed.kernel_args.split())
-            self.assertIn("net.ifnames=0", online_preseed.kernel_args.split())
-
-            legacy_install = next(
-                entry
-                for entry in entries
-                if entry.title == "... Kali Netinst Install"
-                and entry.menu_path == ("Kali ...", "Kali Legacy ...")
-            )
-            self.assertEqual(legacy_install.kernel_path, "/boot/kali/netinst/vmlinuz")
-            self.assertFalse(
-                any(
-                    entry.title == "... Kali Netinst Install"
-                    and entry.menu_path == ("Kali ...", "Kali Netinst ...")
-                    for entry in entries
-                )
-            )
-
-            offline_preseed = next(
-                entry
-                for entry in entries
-                if entry.title == default_title
-                and entry.menu_path
-                == ("Kali ...", "Kali Netinst ...", "Kali Netinst Install (USB Preseed) ...", "Preseed Public ...")
-            )
-            self.assertEqual(offline_preseed.kernel_path, "/boot/kali/netinst/vmlinuz")
-            self.assertEqual(_seed_transport_tokens(offline_preseed.kernel_args), [f"url={public_url}"])
-            self.assertNotIn("/cdrom/simple-cdd/default.preseed", offline_preseed.kernel_args)
+            for flavor, suffix in (("DESKTOP", "de"), ("SERVER", "srv")):
+                path = ("Kali ...", "Kali Netinst ...", "KALI " + flavor)
+                for transport in ("HTTPS WEB", "HTTP LAN", "INITRD PRESEED", "USB HD-MEDIA"):
+                    selected = [entry for entry in entries if entry.menu_path == path + (f"Kali Netinst Install ({transport}) ...",)]
+                    self.assertTrue(selected, (flavor, transport))
+                    for entry in selected:
+                        if not entry.kernel_path:  # An unset URL is a disabled explanatory entry.
+                            self.assertTrue(entry.title.startswith("Not configured:"))
+                            continue
+                        self.assertEqual(entry.kernel_path, f"/kali-netinst-{suffix}/vmlinuz")
+                        self.assertEqual(entry.initrd_path, f"/kali-netinst-{suffix}/initrd.gz")
+                        self.assertIn("iso-scan/filename=", entry.kernel_args)
+                        if transport == "INITRD PRESEED":
+                            self.assertEqual(_seed_transport_tokens(entry.kernel_args), [])
+                        elif transport == "USB HD-MEDIA":
+                            self.assertEqual(_seed_transport_tokens(entry.kernel_args), [f"file=/hd-media/kali-preseed-{suffix}/preseed.cfg"])
+            self.assertFalse(any("Live Environment" in entry.title for entry in entries))
 
     def test_render_managed_grub_custom_menu_adds_kali_encrypted_live_entries(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2150,16 +2017,14 @@ menuentry 'Tails (Troubleshooting)' {
 
             grub_cfg = rendered["grub_cfg"]
             self.assertIn('submenu "Tails ..."', grub_cfg)
-            self.assertIn('submenu "Tails Live ..."', grub_cfg)
+            self.assertIn('submenu "Tails Live (experimental) ..."', grub_cfg)
             self.assertIn('submenu "Tails Legacy ..."', grub_cfg)
             self.assertNotIn('submenu "Tails Live Preserved ..."', grub_cfg)
+            self.assertNotIn("Encrypted Persistence", grub_cfg)
+            self.assertNotIn("(Persistence)", grub_cfg)
             for title in (
-                'menuentry "... Tails Live Environment"',
-                'menuentry "... Tails Live Environment (RAM)"',
-                'menuentry "... Tails Live Environment (Persistence)"',
-                'menuentry "... Tails Live Environment (RAM + Persistence)"',
-                'menuentry "... Tails Live Environment (Encrypted Persistence)"',
-                'menuentry "... Tails Live Environment (RAM + Encrypted Persistence)"',
+                'menuentry "... Tails Live Environment [experimental, no persistence]"',
+                'menuentry "... Tails Live Environment (RAM) [experimental, no persistence]"',
             ):
                 self.assertIn(title, grub_cfg)
 
@@ -2169,7 +2034,7 @@ menuentry 'Tails (Troubleshooting)' {
             kernel = root / "linux"
             initrd = root / "initrd.gz"
             kernel.write_text("netboot-kernel", encoding="utf-8")
-            initrd.write_text("netboot-initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             bundle = prepare_managed_installer_source(
                 "debian",
                 "netboot",
@@ -2211,7 +2076,7 @@ menuentry 'Tails (Troubleshooting)' {
             initrd = root / "initrd.gz"
             iso = root / "debian-netinst.iso"
             kernel.write_text("hd-media-kernel", encoding="utf-8")
-            initrd.write_text("hd-media-initrd", encoding="utf-8")
+            write_installer_initrd(initrd)
             iso.write_text("iso", encoding="utf-8")
             with patch(
                 "debian_usb.installer_sources.validate_netinst_payload_iso",

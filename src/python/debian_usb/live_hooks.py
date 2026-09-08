@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ipaddress
 import os
 from pathlib import Path
 import re
@@ -26,8 +25,6 @@ DEBIAN_LIVE_WIFI_KEYS = (
 DEBIAN_LIVE_WIFI_ROOT_PATH = "etc/debian-usb/live.env"
 DEBIAN_LIVE_WIFI_MEDIUM_FILENAME = "debian-usb-live.env"
 MAX_DEBIAN_LIVE_ENV_BYTES = 16 * 1024
-_LIVE_ENV_ASSIGNMENT_RE = re.compile(r"^(?P<key>[A-Z][A-Z0-9_]*)=(?P<value>.*)$")
-_LIVE_WIFI_INTERFACE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 DEBIAN_LIVE_HOOK_KERNEL_ARGS = (
     "live-config.hooks=medium",
 )
@@ -112,6 +109,10 @@ DEBIAN_LIVE_HOOK_PACKAGES = (
     "iproute2",
     "iw",
     "wpasupplicant",
+    "network-manager",
+    "sudo",
+    "live-boot",
+    "live-boot-initramfs-tools",
     "dhcpcd-base",
     "rfkill",
     "wireless-regdb",
@@ -152,12 +153,14 @@ def live_config_hooks_dir() -> Path:
     raise RuntimeError("could not locate the Debian Live config hook directory")
 
 
-def stage_debian_live_config_hooks(live_binary_dir: Path) -> list[Path]:
+def stage_debian_live_config_hooks(live_binary_dir: Path, profile: str = "debian") -> list[Path]:
     source_dir = live_config_hooks_dir()
     destination_dir = live_binary_dir / "config-hooks"
     destination_dir.mkdir(parents=True, exist_ok=True)
     staged: list[Path] = []
     for filename in LIVE_CONFIG_HOOK_FILENAMES:
+        if profile != "debian" and filename == "0500-apt-live-medium.sh":
+            continue  # Never replace Kali repositories with Debian APT policy.
         source = source_dir / filename
         destination = destination_dir / filename
         shutil.copyfile(source, destination)
@@ -166,8 +169,12 @@ def stage_debian_live_config_hooks(live_binary_dir: Path) -> list[Path]:
     return staged
 
 
-def debian_live_env_path(path: str | Path = "") -> Path:
-    override = str(path or os.environ.get(LIVE_ENV_PATH_ENV, "")).strip()
+def debian_live_env_path(path: str | Path = "", profile: str = "debian") -> Path:
+    if profile not in {"debian", "kali-linux"}:
+        raise ValueError("Live Wi-Fi policy supports only Debian and Kali Live")
+    family = "kali" if profile == "kali-linux" else "debian"
+    override = str(path or os.environ.get(f"DEBIAN_USB_{family.upper()}_LIVE_ENV_PATH", "")
+                   or os.environ.get(LIVE_ENV_PATH_ENV, "")).strip()
     if override:
         candidate = Path(override).expanduser()
         if not candidate.is_absolute():
@@ -176,117 +183,37 @@ def debian_live_env_path(path: str | Path = "") -> Path:
 
     module_path = Path(__file__).resolve()
     candidates = (
-        module_path.parents[2] / "initrd/debian/live/live.env",
-        module_path.parents[3] / "initrd/debian/live/live.env",
-        Path("/usr/lib/debian-usb/initrd/debian/live/live.env"),
+        module_path.parents[2] / f"initrd/{family}/live/live.env",
+        module_path.parents[3] / f"initrd/{family}/live/live.env",
+        Path(f"/usr/lib/debian-usb/initrd/{family}/live/live.env"),
     )
     for candidate in candidates:
         if candidate.exists():
             return _validate_live_env_source(candidate)
-    raise RuntimeError("could not locate initrd/debian/live/live.env")
+    raise RuntimeError(f"could not locate initrd/{family}/live/live.env")
 
 
-def load_debian_live_wifi_config(path: str | Path = "") -> dict[str, str]:
-    source = debian_live_env_path(path)
-    text = source.read_text(encoding="utf-8")
-    assignments: dict[str, str] = {}
-    allowed = set(DEBIAN_LIVE_WIFI_KEYS)
-    for line_number, raw_line in enumerate(text.splitlines(), start=1):
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        match = _LIVE_ENV_ASSIGNMENT_RE.fullmatch(line)
-        if match is None:
-            raise ValueError(f"invalid Debian Live environment assignment at {source}:{line_number}")
-        key = match.group("key")
-        if key not in allowed:
-            raise ValueError(f"unsupported Debian Live environment key at {source}:{line_number}: {key}")
-        if key in assignments:
-            raise ValueError(f"duplicate Debian Live environment key at {source}:{line_number}: {key}")
-        assignments[key] = _decode_live_env_value(match.group("value"), source, line_number)
-
-    normalized = {key: assignments.get(key, "") for key in DEBIAN_LIVE_WIFI_KEYS}
-    interface = normalized["LIVE_WIFI_INTERFACE"] or "auto"
-    if _LIVE_WIFI_INTERFACE_RE.fullmatch(interface) is None:
-        raise ValueError("LIVE_WIFI_INTERFACE must be auto or a valid Linux interface name")
-    normalized["LIVE_WIFI_INTERFACE"] = interface
-
-    essid = normalized["LIVE_WIFI_ESSID"]
-    _validate_live_wifi_text(essid, "LIVE_WIFI_ESSID", max_bytes=32)
-    security = normalized["LIVE_WIFI_SECURITY"] or "wpa"
-    if security not in {"open", "wpa", "sae"}:
-        raise ValueError("LIVE_WIFI_SECURITY must be one of: open, wpa, sae")
-    normalized["LIVE_WIFI_SECURITY"] = security
-
-    cidr = normalized["LIVE_WIFI_CIDR"]
-    if cidr:
-        try:
-            cidr = str(ipaddress.IPv4Interface(cidr))
-        except (ipaddress.AddressValueError, ipaddress.NetmaskValueError) as exc:
-            raise ValueError("LIVE_WIFI_CIDR must be an IPv4 address with a CIDR prefix") from exc
-    normalized["LIVE_WIFI_CIDR"] = cidr
-
-    gateway = normalized["LIVE_WIFI_GATEWAY"]
-    if gateway:
-        try:
-            gateway = str(ipaddress.IPv4Address(gateway))
-        except ipaddress.AddressValueError as exc:
-            raise ValueError("LIVE_WIFI_GATEWAY must be an IPv4 address") from exc
-    normalized["LIVE_WIFI_GATEWAY"] = gateway
-
-    nameservers: list[str] = []
-    for value in re.split(r"[\s,]+", normalized["LIVE_WIFI_NAMESERVERS"].strip()):
-        if not value:
-            continue
-        try:
-            nameserver = str(ipaddress.IPv4Address(value))
-        except ipaddress.AddressValueError as exc:
-            raise ValueError("LIVE_WIFI_NAMESERVERS must contain only IPv4 addresses") from exc
-        if nameserver not in nameservers:
-            nameservers.append(nameserver)
-    normalized["LIVE_WIFI_NAMESERVERS"] = ",".join(nameservers)
-
-    passphrase = normalized["LIVE_WIFI_PASSPHRASE"]
-    _validate_live_wifi_text(passphrase, "LIVE_WIFI_PASSPHRASE", max_bytes=64)
-    if not essid or security == "open":
-        passphrase = ""
-    elif security == "wpa":
-        passphrase_bytes = len(passphrase.encode("utf-8"))
-        is_hex_psk = len(passphrase) == 64 and all(char in "0123456789abcdefABCDEF" for char in passphrase)
-        if not is_hex_psk and not 8 <= passphrase_bytes <= 63:
-            raise ValueError("LIVE_WIFI_PASSPHRASE must be 8 to 63 UTF-8 bytes or a 64-digit hexadecimal PSK for WPA")
-    elif not 1 <= len(passphrase.encode("utf-8")) <= 63:
-        raise ValueError("LIVE_WIFI_PASSPHRASE must be 1 to 63 UTF-8 bytes for SAE")
-    normalized["LIVE_WIFI_PASSPHRASE"] = passphrase
-
-    return normalized
+def load_debian_live_wifi_config(path: str | Path = "", profile: str = "debian") -> dict[str, str]:
+    from .live_wifi import load_config
+    return load_config(debian_live_env_path(path, profile))
 
 
-def render_debian_live_wifi_config(path: str | Path = "") -> str:
-    config = load_debian_live_wifi_config(path)
-    lines = [
-        "# Generated from initrd/debian/live/live.env; do not source this file.",
-        "# Parsed through an explicit allowlist by the Debian Live Wi-Fi hook.",
-    ]
-    for key in DEBIAN_LIVE_WIFI_KEYS:
-        value = config[key]
-        if "'" in value:
-            raise ValueError(f"{key} must not contain single quote characters")
-        lines.append(f"{key}='{value}'")
-    return "\n".join(lines) + "\n"
+def render_debian_live_wifi_config(path: str | Path = "", profile: str = "debian") -> str:
+    from .live_wifi import render_config
+    return render_config(load_debian_live_wifi_config(path, profile))
 
 
-def stage_debian_live_wifi_config(live_root_dir: Path, source_path: str | Path = "") -> Path:
+def stage_debian_live_wifi_config(live_root_dir: Path, source_path: str | Path = "", profile: str = "debian") -> Path:
     root = _prepare_live_root(live_root_dir)
     destination = _prepare_live_root_path(root, DEBIAN_LIVE_WIFI_ROOT_PATH)
-    _write_private_live_config(destination, render_debian_live_wifi_config(source_path))
+    _write_private_live_config(destination, render_debian_live_wifi_config(source_path, profile))
     return destination
 
 
-def stage_debian_live_medium_wifi_config(live_binary_dir: Path, source_path: str | Path = "") -> Path:
+def stage_debian_live_medium_wifi_config(live_binary_dir: Path, source_path: str | Path = "", profile: str = "debian") -> Path:
     live_dir = _prepare_live_root(live_binary_dir)
     destination = live_dir / DEBIAN_LIVE_WIFI_MEDIUM_FILENAME
-    _write_private_live_config(destination, render_debian_live_wifi_config(source_path))
+    _write_private_live_config(destination, render_debian_live_wifi_config(source_path, profile))
     return destination
 
 
@@ -302,29 +229,6 @@ def _validate_live_env_source(path: Path) -> Path:
     if metadata.st_size > MAX_DEBIAN_LIVE_ENV_BYTES:
         raise ValueError(f"Debian Live environment file exceeds {MAX_DEBIAN_LIVE_ENV_BYTES} bytes: {path}")
     return path.resolve()
-
-
-def _decode_live_env_value(raw_value: str, source: Path, line_number: int) -> str:
-    value = raw_value.strip()
-    if not value:
-        return ""
-    if value[0] in {"'", '"'}:
-        quote = value[0]
-        if len(value) < 2 or value[-1] != quote:
-            raise ValueError(f"unterminated Debian Live environment value at {source}:{line_number}")
-        value = value[1:-1]
-    elif any(char.isspace() for char in value):
-        raise ValueError(f"unquoted whitespace in Debian Live environment value at {source}:{line_number}")
-    if any(ord(char) < 32 or ord(char) == 127 for char in value):
-        raise ValueError(f"control character in Debian Live environment value at {source}:{line_number}")
-    return value
-
-
-def _validate_live_wifi_text(value: str, key: str, *, max_bytes: int) -> None:
-    if any(ord(char) < 32 or ord(char) == 127 for char in value):
-        raise ValueError(f"{key} must not contain control characters")
-    if len(value.encode("utf-8")) > max_bytes:
-        raise ValueError(f"{key} must not exceed {max_bytes} UTF-8 bytes")
 
 
 def _write_private_live_config(path: Path, content: str) -> None:
@@ -631,3 +535,91 @@ def stage_debian_live_apt_policy(live_root_dir: Path) -> list[Path]:
         'APT::Update::Pre-Invoke { "/usr/lib/debian-usb/live-apt-repair"; };\n', encoding="utf-8")
     hook.chmod(0o644)
     return [*destinations, unit, link, hook]
+
+
+def live_hook_packages(profile: str) -> list[str]:
+    """Required runtime packages. Distro-specific firmware is resolved separately."""
+    if profile == "debian":
+        return list(DEBIAN_LIVE_HOOK_PACKAGES)
+    if profile != "kali-linux":
+        return []
+    return [package for package in DEBIAN_LIVE_HOOK_PACKAGES
+            if not (package.startswith("firmware-") or package in {
+                "debian-archive-keyring", "bluez-firmware", "intel-microcode"})] + ["kali-archive-keyring"]
+
+
+def live_optional_firmware(profile: str) -> list[str]:
+    if profile != "kali-linux":
+        return []
+    return [package for package in DEBIAN_LIVE_HOOK_PACKAGES
+            if package.startswith("firmware-") or package in {"bluez-firmware", "intel-microcode"}]
+
+
+def stage_live_wifi_runtime(live_root_dir: Path, source_path: str | Path = "", profile: str = "debian") -> list[Path]:
+    """Install a shared runtime, first-boot service, home launcher and initrd hook."""
+    from .live_wifi import LAUNCHER
+    root = _prepare_live_root(live_root_dir)
+    staged = [stage_debian_live_wifi_config(root, source_path, profile)]
+    runtime = _prepare_live_root_path(root, "usr/local/lib/debian-usb/live-wifi.py")
+    if runtime.is_symlink():
+        raise ValueError("refusing symlinked Wi-Fi runtime")
+    shutil.copyfile(Path(__file__).with_name("live_wifi.py"), runtime)
+    runtime.chmod(0o755)
+    staged.append(runtime)
+    scripts = {
+        "etc/skel/wifi-connect.sh": LAUNCHER,
+        "usr/local/bin/wifi-connect.sh": LAUNCHER,
+        "etc/NetworkManager/dispatcher.d/90-debian-usb-wifi-priority":
+            '#!/bin/sh\ncase "${2:-}" in up|dhcp4-change|dhcp6-change) '
+            '/usr/local/lib/debian-usb/live-wifi.py --priority ;; esac\n',
+        "etc/initramfs-tools/hooks/zzzz-debian-usb-wifi":
+            '#!/bin/sh\nset -eu\ncase "${1:-}" in prereqs) exit 0 ;; esac\n'
+            ': "${DESTDIR:?initramfs destination is required}"\n'
+            'umask 077\ncp /etc/debian-usb/live.env "${DESTDIR}/live.env"\n'
+            'chmod 0600 "${DESTDIR}/live.env"\n'
+            'mkdir -p "${DESTDIR}/scripts/init-bottom"\n'
+            'cp /usr/share/debian-usb/live-env-init-bottom "${DESTDIR}/scripts/init-bottom/debian-usb-live-env"\n'
+            'chmod 0755 "${DESTDIR}/scripts/init-bottom/debian-usb-live-env"\n',
+        "usr/share/debian-usb/live-env-init-bottom":
+            '#!/bin/sh\nset -eu\ncase "${1:-}" in prereqs) exit 0 ;; esac\n'
+            '[ -s /live.env ] || exit 0\numask 077\n'
+            'mkdir -p /run/initramfs/debian-usb\n'
+            'cp /live.env /run/initramfs/debian-usb/live.env\n'
+            'chmod 0600 /run/initramfs/debian-usb/live.env\n',
+    }
+    for relative, text in scripts.items():
+        path = _prepare_live_root_path(root, relative)
+        if path.is_symlink():
+            raise ValueError(f"refusing symlinked Wi-Fi helper: {path}")
+        path.write_text(text, encoding="utf-8")
+        path.chmod(0o755)
+        staged.append(path)
+    unit = _prepare_live_root_path(root, "etc/systemd/system/debian-usb-live-wifi.service")
+    if unit.is_symlink():
+        raise ValueError("refusing symlinked Wi-Fi service")
+    unit.write_text(
+        "[Unit]\nDescription=Debian/Kali Live Wi-Fi preference and Ethernet fallback\n"
+        "Wants=NetworkManager.service\nAfter=NetworkManager.service live-config.service\n"
+        "ConditionPathExists=/etc/debian-usb/live.env\n\n[Service]\nType=oneshot\n"
+        "ExecStart=/usr/local/lib/debian-usb/live-wifi.py --boot\nTimeoutStartSec=120\n"
+        "RemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n", encoding="utf-8")
+    unit.chmod(0o644)
+    wants = _prepare_live_root_path(root, "etc/systemd/system/multi-user.target.wants/debian-usb-live-wifi.service")
+    if wants.exists() or wants.is_symlink():
+        wants.unlink()
+    wants.symlink_to("../debian-usb-live-wifi.service")
+    staged += [unit, wants]
+    # Images with a pre-created Live account do not copy /etc/skel again.
+    home_root = _prepare_live_root_directory(root, "home")
+    for home in home_root.iterdir():
+        if home.is_dir() and not home.is_symlink():
+            target = home / "wifi-connect.sh"
+            if target.exists() or target.is_symlink():
+                continue
+            target.write_text(LAUNCHER, encoding="utf-8")
+            target.chmod(0o755)
+            if os.geteuid() == 0:
+                metadata = home.stat()
+                os.chown(target, metadata.st_uid, metadata.st_gid)
+            staged.append(target)
+    return staged

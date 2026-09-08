@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import OrderedDict
 import json
 import os
+import re
 from pathlib import Path
 
 from .bootpolicy import valid_installer_policy, valid_live_boot_policy
@@ -49,11 +50,48 @@ CUSTOM_GRUB_SPEC_ENV = "DEBIAN_USB_SPEC_DIR"
 LEGACY_KEY_ALIASES = {
     "KALI_LIVE_KERNEL_EXTRAS": "KALI_LINUX_LIVE_KERNEL_EXTRAS",
     "KALI_INSTALLER_KERNEL_EXTRAS": "KALI_LINUX_INSTALLER_KERNEL_EXTRAS",
-    "DEBIAN_PRESEED_URL": "DEBIAN_PRESEED_INTERNAL_URL",
-    "KALI_PRESEED_URL": "KALI_LINUX_PRESEED_INTERNAL_URL",
-    "KALI_LINUX_PRESEED_URL": "KALI_LINUX_PRESEED_INTERNAL_URL",
+    "DEBIAN_PRESEED_URL": "DEBIAN_DE_PRESEED_INTERNAL_URL",
+    "KALI_PRESEED_URL": "KALI_LINUX_DE_PRESEED_INTERNAL_URL",
+    "KALI_LINUX_PRESEED_URL": "KALI_LINUX_DE_PRESEED_INTERNAL_URL",
     "KALI_PURPLE_PRESEED_URL": "KALI_PURPLE_PRESEED_INTERNAL_URL",
 }
+LEGACY_KEY_ALIASES.update({
+    'PRESEED_USB_DEBIAN_FILE': 'PRESEED_USB_DEBIAN_DE_FILE',
+    'PRESEED_USB_KALI_FILE': 'PRESEED_USB_KALI_DE_FILE',
+    'PRESEED_HOST_DEBIAN_PATH': 'PRESEED_HOST_DEBIAN_DE_PATH',
+    'PRESEED_HOST_KALI_PATH': 'PRESEED_HOST_KALI_DE_PATH',
+    'DEBIAN_PRESEED_INTERNAL_URL': 'DEBIAN_DE_PRESEED_INTERNAL_URL',
+    'DEBIAN_PRESEED_PUBLIC_URL': 'DEBIAN_DE_PRESEED_PUBLIC_URL',
+    'DEBIAN_PRESEED_INTERNAL_ARGS': 'DEBIAN_DE_PRESEED_INTERNAL_ARGS',
+    'DEBIAN_PRESEED_PUBLIC_ARGS': 'DEBIAN_DE_PRESEED_PUBLIC_ARGS',
+    'KALI_LINUX_PRESEED_INTERNAL_URL': 'KALI_LINUX_DE_PRESEED_INTERNAL_URL',
+    'PRESEED_ONE_ARGS_DEBIAN': 'PRESEED_ONE_ARGS_DEBIAN_DE',
+    'PRESEED_TWO_ARGS_DEBIAN': 'PRESEED_TWO_ARGS_DEBIAN_DE',
+    'PRESEED_THREE_ARGS_DEBIAN': 'PRESEED_THREE_ARGS_DEBIAN_DE',
+    'PRESEED_FOUR_ARGS_DEBIAN': 'PRESEED_FOUR_ARGS_DEBIAN_DE',
+    'PRESEED_FIVE_ARGS_DEBIAN': 'PRESEED_FIVE_ARGS_DEBIAN_DE',
+    'PRESEED_SIX_ARGS_DEBIAN': 'PRESEED_ONE_ARGS_DEBIAN_SRV',
+    'PRESEED_SEVEN_ARGS_DEBIAN': 'PRESEED_TWO_ARGS_DEBIAN_SRV',
+    'PRESEED_EIGHT_ARGS_DEBIAN': 'PRESEED_THREE_ARGS_DEBIAN_SRV',
+    'PRESEED_NINE_ARGS_DEBIAN': 'PRESEED_FOUR_ARGS_DEBIAN_SRV',
+    'PRESEED_ONE_ARGS_KALI': 'PRESEED_ONE_ARGS_KALI_DE',
+    'PRESEED_TWO_ARGS_KALI': 'PRESEED_TWO_ARGS_KALI_DE',
+    'PRESEED_THREE_ARGS_KALI': 'PRESEED_THREE_ARGS_KALI_DE',
+    'PRESEED_FOUR_ARGS_KALI': 'PRESEED_FOUR_ARGS_KALI_DE',
+    'PRESEED_FIVE_ARGS_KALI': 'PRESEED_FIVE_ARGS_KALI_DE',
+    'PRESEED_SIX_ARGS_KALI': 'PRESEED_ONE_ARGS_KALI_SRV',
+    'PRESEED_SEVEN_ARGS_KALI': 'PRESEED_TWO_ARGS_KALI_SRV',
+    'PRESEED_EIGHT_ARGS_KALI': 'PRESEED_THREE_ARGS_KALI_SRV',
+    'PRESEED_NINE_ARGS_KALI': 'PRESEED_FOUR_ARGS_KALI_SRV',
+})
+
+
+def profile_preseed_internal_key(profile: str) -> str:
+    prefix = PROFILE_PREFIXES[profile]
+    if profile in {"debian", "kali-linux"}:
+        prefix += "_DE"
+    return f"{prefix}_PRESEED_INTERNAL_URL"
+
 MANAGED_SOURCE_URL_BASE_KEYS = (
     "DEBIAN_LIVE_ISO_URL",
     "DEBIAN_NETINST_ISO_URL",
@@ -105,7 +143,7 @@ LEGACY_SECRET_KERNEL_ARG_NAMES = frozenset(
         "obs_password",
     }
 )
-LEGACY_SECRET_KERNEL_ARG_DESTINATION = "initrd/debian/netinst/preseed.env"
+LEGACY_SECRET_KERNEL_ARG_DESTINATION = "initrd/debian/netinst/desktop/preseed.env"
 LIVE_WIFI_SECRET_KERNEL_ARG_NAMES = frozenset(
     {
         "DEFAULT_LIVE_WIFI_INTERFACE",
@@ -189,7 +227,7 @@ SINGLE_OS_PARTITION_LABEL_CONFIG_KEYS = (
 )
 
 def _numbered_preseed_arg_keys(os_name: str) -> tuple[str, ...]:
-    return tuple(f"PRESEED_{number_name}_ARGS_{os_name}" for number_name in PRESEED_NUMBER_NAMES)
+    return tuple(f"PRESEED_{number_name}_ARGS_{os_name}_{suffix}" for suffix in ("DE", "SRV") for number_name in PRESEED_NUMBER_NAMES)
 
 
 def _custom_grub_spec_candidates() -> tuple[Path, ...]:
@@ -251,8 +289,8 @@ def _spec_referenced_config_keys() -> tuple[str, ...]:
 def _spec_referenced_kernel_arg_keys() -> tuple[str, ...]:
     specialized_keys = {
         "PRESEED_COMMON_KERNEL_ARGS",
-        "DEBIAN_PRESEED_PUBLIC_ARGS",
-        "DEBIAN_PRESEED_INTERNAL_ARGS",
+        "DEBIAN_DE_PRESEED_PUBLIC_ARGS",
+        "DEBIAN_DE_PRESEED_INTERNAL_ARGS",
     }
     return tuple(
         key
@@ -262,14 +300,12 @@ def _spec_referenced_kernel_arg_keys() -> tuple[str, ...]:
 
 
 PRESEED_USB_FILE_KEYS = {
-    PROFILE_DEBIAN: "PRESEED_USB_DEBIAN_FILE",
-    PROFILE_KALI_LINUX: "PRESEED_USB_KALI_FILE",
+    PROFILE_DEBIAN: "PRESEED_USB_DEBIAN_DE_FILE",
+    PROFILE_KALI_LINUX: "PRESEED_USB_KALI_DE_FILE",
     PROFILE_KALI_PURPLE: "PRESEED_USB_PURPLE_FILE",
 }
 
 PRESEED_HOST_PATH_KEYS = {
-    PROFILE_DEBIAN: "PRESEED_HOST_DEBIAN_PATH",
-    PROFILE_KALI_LINUX: "PRESEED_HOST_KALI_PATH",
     PROFILE_KALI_PURPLE: "PRESEED_HOST_PURPLE_PATH",
 }
 
@@ -301,7 +337,7 @@ CONFIG_SECTIONS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
         "Multi-OS and shared labels",
         (
             "These labels are used by both single-OS and Multi-OS flows where applicable.",
-            "In the shared ISO-store Multi-OS flow, only DEFAULT_ESP_LABEL, DEFAULT_MULTI_DATA_LABEL, and the Debian/Kali/Tails persistence labels are used.",
+            "In the shared ISO-store Multi-OS flow, only DEFAULT_ESP_LABEL, DEFAULT_MULTI_DATA_LABEL, and the Debian/Kali persistence labels (the Tails label is legacy and unused) are used.",
             "DEFAULT_ESP_LABEL must fit the FAT volume-label limit; other labels must fit ext4 and GPT label use.",
         ),
         MULTIOS_PARTITION_LABEL_CONFIG_KEYS,
@@ -318,9 +354,9 @@ CONFIG_SECTIONS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
     (
         "Live config hooks",
         (
-            "Debian Live always receives the APT repair and Wi-Fi hooks plus live-config.hooks=medium.",
+            "Debian and Kali Live receive Wi-Fi hooks plus live-config.hooks=medium; APT repair is Debian-only.",
             "DEFAULT_LIVE_HOOKS controls only optional additional hook arguments.",
-            "Every Wi-Fi value is read from initrd/debian/live/live.env and never appended to kernel arguments.",
+            "Wi-Fi values come from initrd/debian/live/live.env or initrd/kali/live/live.env, never kernel arguments.",
         ),
         (
             "DEFAULT_LIVE_HOOKS",
@@ -393,14 +429,14 @@ CONFIG_SECTIONS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
         (
             "Debian and Kali installer-capable entries use the configured internal profile URL by default.",
             "The shared public URL is applied by the custom GRUB Preseed Public submenus as the single url= transport.",
-            "DEBIAN_PRESEED_INTERNAL_ARGS and DEBIAN_PRESEED_PUBLIC_ARGS are optional GRUB overlays applied only to their matching submenu variants.",
+            "DEBIAN_DE_PRESEED_INTERNAL_ARGS and DEBIAN_DE_PRESEED_PUBLIC_ARGS are optional GRUB overlays applied only to their matching submenu variants.",
             "The shipped public overlay disables d-i HTTPS certificate validation; clear it to require normal CA validation.",
         ),
-        ("DEBIAN_PRESEED_PUBLIC_URL",)
-        + tuple(f"{PROFILE_PREFIXES[profile]}_PRESEED_INTERNAL_URL" for profile in PRESEED_URL_PROFILES)
+        ("DEBIAN_DE_PRESEED_PUBLIC_URL",)
+        + tuple(profile_preseed_internal_key(profile) for profile in PRESEED_URL_PROFILES)
         + (
-            "DEBIAN_PRESEED_PUBLIC_ARGS",
-            "DEBIAN_PRESEED_INTERNAL_ARGS",
+            "DEBIAN_DE_PRESEED_PUBLIC_ARGS",
+            "DEBIAN_DE_PRESEED_INTERNAL_ARGS",
         ),
     ),
     (
@@ -409,11 +445,9 @@ CONFIG_SECTIONS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
             "These paths control where the writer copies host preseed trees onto the USB for Debian, Kali Linux, and Kali Purple.",
         ),
         (
-            "PRESEED_USB_DEBIAN_FILE",
-            "PRESEED_USB_KALI_FILE",
+            "PRESEED_USB_DEBIAN_DE_FILE",
+            "PRESEED_USB_KALI_DE_FILE",
             "PRESEED_USB_PURPLE_FILE",
-            "PRESEED_HOST_DEBIAN_PATH",
-            "PRESEED_HOST_KALI_PATH",
             "PRESEED_HOST_PURPLE_PATH",
         ),
     ),
@@ -437,6 +471,32 @@ CONFIG_SECTIONS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
 )
 
 
+INSTALLER_FLAVOR_CONFIG_KEYS = tuple(
+    key
+    for family, prefix in (("DEBIAN", "DEBIAN"), ("KALI", "KALI_LINUX"))
+    for suffix in ("DE", "SRV")
+    for key in (
+        f"PRESEED_USB_{family}_{suffix}_FILE",
+        *(f"{prefix}_{suffix}_PRESEED_{scope}_{kind}" for scope in ("PUBLIC", "INTERNAL") for kind in ("URL", "ARGS")),
+        *(f"PRESEED_{number}_ARGS_{family}_{suffix}" for number in ("ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE")),
+    )
+)
+# Move split-profile fields into one dedicated section; never emit duplicates.
+CONFIG_SECTIONS = tuple(
+    (title, comments, tuple(key for key in keys if key not in INSTALLER_FLAVOR_CONFIG_KEYS))
+    for title, comments, keys in CONFIG_SECTIONS
+) + ((
+    "Desktop and Server installer profiles (netinst and netboot)",
+    (
+        "DE = Desktop; SRV = Server. These settings do not change live boot entries.",
+        "PUBLIC URLs back HTTPS WEB; INTERNAL URLs back HTTP LAN. Empty URLs disable only that transport.",
+        "Host paths are entered only after explicit HD-MEDIA consent. USB entries exist even when copying is declined.",
+        "Preset visibility is controlled by the GRUB JSON; INITRD PRESEED never receives a URL or file argument.",
+    ),
+    INSTALLER_FLAVOR_CONFIG_KEYS,
+),)
+
+
 def _required_config_keys() -> tuple[str, ...]:
     required = [
         "APP_NAME",
@@ -457,16 +517,15 @@ def _required_config_keys() -> tuple[str, ...]:
         "DEFAULT_INSTALLER_KERNEL_EXTRAS",
         "DEFAULT_FORENSICS_KERNEL_EXTRAS",
         "PRESEED_COMMON_KERNEL_ARGS",
-        "PRESEED_USB_DEBIAN_FILE",
-        "PRESEED_USB_KALI_FILE",
+        "PRESEED_USB_DEBIAN_DE_FILE",
+        "PRESEED_USB_KALI_DE_FILE",
         "PRESEED_USB_PURPLE_FILE",
-        "PRESEED_HOST_DEBIAN_PATH",
-        "PRESEED_HOST_KALI_PATH",
         "PRESEED_HOST_PURPLE_PATH",
-        "DEBIAN_PRESEED_PUBLIC_URL",
-        "DEBIAN_PRESEED_PUBLIC_ARGS",
-        "DEBIAN_PRESEED_INTERNAL_ARGS",
+        "DEBIAN_DE_PRESEED_PUBLIC_URL",
+        "DEBIAN_DE_PRESEED_PUBLIC_ARGS",
+        "DEBIAN_DE_PRESEED_INTERNAL_ARGS",
     ]
+    required.extend(INSTALLER_FLAVOR_CONFIG_KEYS)
     required.extend(MANAGED_SOURCE_URL_KEYS)
     required.extend(PARTITION_LABEL_CONFIG_KEYS)
     required.extend(_spec_referenced_config_keys())
@@ -479,7 +538,7 @@ def _required_config_keys() -> tuple[str, ...]:
     for profile in INSTALLER_OVERRIDE_PROFILES:
         required.append(f"{PROFILE_PREFIXES[profile]}_INSTALLER_KERNEL_EXTRAS")
     for profile in PRESEED_URL_PROFILES:
-        required.append(f"{PROFILE_PREFIXES[profile]}_PRESEED_INTERNAL_URL")
+        required.append(profile_preseed_internal_key(profile))
     return tuple(required)
 
 
@@ -494,15 +553,16 @@ def _optional_empty_keys() -> set[str]:
         "DEFAULT_INSTALLER_KERNEL_EXTRAS",
         "DEFAULT_FORENSICS_KERNEL_EXTRAS",
         "DEFAULT_LIVE_ARGS_HOOKS",
-        "DEBIAN_PRESEED_PUBLIC_ARGS",
-        "DEBIAN_PRESEED_INTERNAL_ARGS",
+        "DEBIAN_DE_PRESEED_PUBLIC_ARGS",
+        "DEBIAN_DE_PRESEED_INTERNAL_ARGS",
     }
-    optional.update({"PRESEED_ONE_ARGS_DEBIAN", "PRESEED_ONE_ARGS_KALI"})
+    optional.update({"PRESEED_ONE_ARGS_DEBIAN_DE", "PRESEED_ONE_ARGS_KALI_DE"})
     optional.update(f"{PROFILE_PREFIXES[profile]}_FALLBACK_LIVE_KERNEL_ARGS" for profile in FALLBACK_LIVE_KERNEL_ARG_PROFILES)
     optional.update(f"{PROFILE_PREFIXES[profile]}_LIVE_KERNEL_EXTRAS" for profile in LIVE_OVERRIDE_PROFILES)
     optional.update(f"{PROFILE_PREFIXES[profile]}_FORENSICS_KERNEL_EXTRAS" for profile in FORENSICS_OVERRIDE_PROFILES)
     optional.update(f"{PROFILE_PREFIXES[profile]}_INSTALLER_KERNEL_EXTRAS" for profile in INSTALLER_OVERRIDE_PROFILES)
-    optional.update(f"{PROFILE_PREFIXES[profile]}_PRESEED_INTERNAL_URL" for profile in PRESEED_URL_PROFILES)
+    optional.update(profile_preseed_internal_key(profile) for profile in PRESEED_URL_PROFILES)
+    optional.update(key for key in _known_config_keys() if ("_PRESEED_" in key and key.endswith(("_URL", "_ARGS"))) or (key.startswith("PRESEED_") and "_ARGS_" in key))
     return optional
 
 
@@ -514,7 +574,7 @@ def _known_config_keys() -> set[str]:
 
 
 def _is_preserved_additional_key(key: str) -> bool:
-    return key.startswith("PRESEED_") or key.endswith("_URL")
+    return key.startswith("PRESEED_") or key.endswith("_URL") or ("_PRESEED_" in key and key.endswith("_ARGS"))
 
 
 def _normalize_absolute_preseed_file_string(value: str, key: str) -> str:
@@ -612,8 +672,8 @@ def _kernel_arg_config_keys() -> tuple[str, ...]:
         "DEFAULT_INSTALLER_KERNEL_EXTRAS",
         "DEFAULT_FORENSICS_KERNEL_EXTRAS",
         "PRESEED_COMMON_KERNEL_ARGS",
-        "DEBIAN_PRESEED_PUBLIC_ARGS",
-        "DEBIAN_PRESEED_INTERNAL_ARGS",
+        "DEBIAN_DE_PRESEED_PUBLIC_ARGS",
+        "DEBIAN_DE_PRESEED_INTERNAL_ARGS",
     ]
     keys.extend(_spec_referenced_kernel_arg_keys())
     keys.extend(f"{PROFILE_PREFIXES[profile]}_FALLBACK_LIVE_KERNEL_ARGS" for profile in FALLBACK_LIVE_KERNEL_ARG_PROFILES)
@@ -737,7 +797,15 @@ def _apply_legacy_key_aliases(data: dict[str, str]) -> OrderedDict[str, str]:
         legacy_value = remapped.get(legacy_key, "").strip()
         canonical_value = remapped.get(canonical_key, "").strip()
         if legacy_value and not canonical_value:
+            for family in ("debian", "kali"):
+                if legacy_key == f"PRESEED_USB_{family.upper()}_FILE" and legacy_value == f"/hd-media/preseed/{family}/preseed.cfg":
+                    legacy_value = f"/hd-media/{family}-preseed-de/preseed.cfg"
             remapped[canonical_key] = legacy_value
+        remapped.pop(legacy_key, None)
+    # Discard obsolete ambient host paths on load and save.
+    for family in ("DEBIAN", "KALI"):
+        for suffix in ("DE", "SRV"):
+            remapped.pop(f"PRESEED_HOST_{family}_{suffix}_PATH", None)
     return remapped
 
 
@@ -802,31 +870,23 @@ def normalize_config(data: dict[str, str]) -> OrderedDict[str, str]:
     normalized["PRESEED_COMMON_KERNEL_ARGS"] = _normalize_kernel_args_string(
         normalized["PRESEED_COMMON_KERNEL_ARGS"]
     )
-    normalized["DEBIAN_PRESEED_PUBLIC_ARGS"] = _normalize_kernel_args_string(
-        normalized["DEBIAN_PRESEED_PUBLIC_ARGS"]
+    normalized["DEBIAN_DE_PRESEED_PUBLIC_ARGS"] = _normalize_kernel_args_string(
+        normalized["DEBIAN_DE_PRESEED_PUBLIC_ARGS"]
     )
-    normalized["DEBIAN_PRESEED_INTERNAL_ARGS"] = _normalize_kernel_args_string(
-        normalized["DEBIAN_PRESEED_INTERNAL_ARGS"]
+    normalized["DEBIAN_DE_PRESEED_INTERNAL_ARGS"] = _normalize_kernel_args_string(
+        normalized["DEBIAN_DE_PRESEED_INTERNAL_ARGS"]
     )
-    normalized["PRESEED_USB_DEBIAN_FILE"] = _normalize_absolute_preseed_file_string(
-        normalized["PRESEED_USB_DEBIAN_FILE"],
-        "PRESEED_USB_DEBIAN_FILE",
+    normalized["PRESEED_USB_DEBIAN_DE_FILE"] = _normalize_absolute_preseed_file_string(
+        normalized["PRESEED_USB_DEBIAN_DE_FILE"],
+        "PRESEED_USB_DEBIAN_DE_FILE",
     )
-    normalized["PRESEED_USB_KALI_FILE"] = _normalize_absolute_preseed_file_string(
-        normalized["PRESEED_USB_KALI_FILE"],
-        "PRESEED_USB_KALI_FILE",
+    normalized["PRESEED_USB_KALI_DE_FILE"] = _normalize_absolute_preseed_file_string(
+        normalized["PRESEED_USB_KALI_DE_FILE"],
+        "PRESEED_USB_KALI_DE_FILE",
     )
     normalized["PRESEED_USB_PURPLE_FILE"] = _normalize_absolute_preseed_file_string(
         normalized["PRESEED_USB_PURPLE_FILE"],
         "PRESEED_USB_PURPLE_FILE",
-    )
-    normalized["PRESEED_HOST_DEBIAN_PATH"] = _normalize_absolute_dir_string(
-        normalized["PRESEED_HOST_DEBIAN_PATH"],
-        "PRESEED_HOST_DEBIAN_PATH",
-    )
-    normalized["PRESEED_HOST_KALI_PATH"] = _normalize_absolute_dir_string(
-        normalized["PRESEED_HOST_KALI_PATH"],
-        "PRESEED_HOST_KALI_PATH",
     )
     normalized["PRESEED_HOST_PURPLE_PATH"] = _normalize_absolute_dir_string(
         normalized["PRESEED_HOST_PURPLE_PATH"],
@@ -856,12 +916,28 @@ def normalize_config(data: dict[str, str]) -> OrderedDict[str, str]:
         )
     for profile in PRESEED_URL_PROFILES:
         prefix = PROFILE_PREFIXES[profile]
-        normalized[f"{prefix}_PRESEED_INTERNAL_URL"] = _normalize_optional_url_string(
-            normalized[f"{prefix}_PRESEED_INTERNAL_URL"]
+        normalized[profile_preseed_internal_key(profile)] = _normalize_optional_url_string(
+            normalized[profile_preseed_internal_key(profile)]
         )
-    normalized["DEBIAN_PRESEED_PUBLIC_URL"] = _normalize_optional_url_string(
-        normalized["DEBIAN_PRESEED_PUBLIC_URL"]
+    normalized["DEBIAN_DE_PRESEED_PUBLIC_URL"] = _normalize_optional_url_string(
+        normalized["DEBIAN_DE_PRESEED_PUBLIC_URL"]
     )
+    for key in INSTALLER_FLAVOR_CONFIG_KEYS:
+        value = normalized.get(key, "")
+        if key.endswith("_URL"):
+            normalized[key] = _normalize_optional_url_string(value)
+        elif key.startswith("PRESEED_USB_"):
+            normalized[key] = _normalize_absolute_preseed_file_string(value, key)
+            if not re.fullmatch(r"/hd-media/[A-Za-z0-9._+-]+/preseed\.cfg", normalized[key]):
+                raise ValueError(f"{key} must be /hd-media/<separate-folder>/preseed.cfg")
+        elif key.startswith("PRESEED_HOST_"):
+            normalized[key] = _normalize_absolute_dir_string(value, key)
+        else:
+            normalized[key] = _normalize_kernel_args_string(value)
+            _reject_legacy_secret_kernel_args(normalized[key], key)
+    locations = [normalized[key] for key in INSTALLER_FLAVOR_CONFIG_KEYS if key.startswith("PRESEED_USB_")]
+    if len(set(locations)) != len(locations):
+        raise ValueError("Desktop/Server USB preseed folders must be distinct for Debian and Kali")
     for key in MANAGED_SOURCE_URL_KEYS:
         normalized[key] = _normalize_optional_url_string(normalized[key])
     for key in _kernel_arg_config_keys():
@@ -1019,7 +1095,7 @@ def update_profile_installer_kernel_extras(path: str, profile: str, kernel_args:
 def update_profile_preseed_url(path: str, profile: str, url: str) -> OrderedDict[str, str]:
     if profile not in PRESEED_URL_PROFILES:
         raise ValueError(f"installer URLs are not supported for profile: {profile}")
-    profile_key = f"{PROFILE_PREFIXES[profile]}_PRESEED_INTERNAL_URL"
+    profile_key = profile_preseed_internal_key(profile)
     config = load_config(path)
     config[profile_key] = _normalize_optional_url_string(url)
     save_config(path, config)
@@ -1043,7 +1119,7 @@ def profile_installer_kernel_extras(data: dict[str, str], profile: str) -> str:
 
 
 def profile_preseed_url(data: dict[str, str], profile: str) -> str:
-    return data.get(f"{PROFILE_PREFIXES[profile]}_PRESEED_INTERNAL_URL", "").strip()
+    return data.get(profile_preseed_internal_key(profile), "").strip()
 
 
 def partition_label(data: dict[str, str], key: str) -> str:
@@ -1130,9 +1206,9 @@ def runtime_config(path: str) -> dict[str, object]:
         "default_live_kernel_extras": data["DEFAULT_LIVE_KERNEL_EXTRAS"],
         "default_installer_kernel_extras": data["DEFAULT_INSTALLER_KERNEL_EXTRAS"],
         "default_forensics_kernel_extras": data["DEFAULT_FORENSICS_KERNEL_EXTRAS"],
-        "debian_preseed_public_url": data["DEBIAN_PRESEED_PUBLIC_URL"],
-        "debian_preseed_public_args": data["DEBIAN_PRESEED_PUBLIC_ARGS"],
-        "debian_preseed_internal_args": data["DEBIAN_PRESEED_INTERNAL_ARGS"],
+        "debian_preseed_public_url": data["DEBIAN_DE_PRESEED_PUBLIC_URL"],
+        "debian_preseed_public_args": data["DEBIAN_DE_PRESEED_PUBLIC_ARGS"],
+        "debian_preseed_internal_args": data["DEBIAN_DE_PRESEED_INTERNAL_ARGS"],
         "preseed_common_kernel_args": data["PRESEED_COMMON_KERNEL_ARGS"],
         "preseed_usb_files": {
             profile: profile_usb_preseed_file(data, profile)

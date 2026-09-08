@@ -579,7 +579,7 @@ func TestBuildMultiOSPlanRejectsPlainTailsPersistence(t *testing.T) {
 		},
 	}}
 	_, err = buildMultiOSPlan(cfg, request)
-	if err == nil || !strings.Contains(err.Error(), "Tails persistence must be encrypted") {
+	if err == nil || !strings.Contains(err.Error(), "Tails native Persistent Storage") {
 		t.Fatalf("expected Tails encrypted persistence validation error, got %v", err)
 	}
 }

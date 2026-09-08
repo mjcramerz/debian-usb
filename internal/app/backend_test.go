@@ -38,6 +38,28 @@ func writeBackendLiveHookTestConfig(t *testing.T) string {
 	return path
 }
 
+// stubSudoForHelper keeps orchestration tests unprivileged even when nested
+// installer profile preparation independently requests sudo. Never run the
+// machine's real sudo, and reject every executable except the test helper.
+func stubSudoForHelper(t *testing.T, helperPath string) {
+	t.Helper()
+	directory := t.TempDir()
+	script := `#!/bin/sh
+set -eu
+if [ "${1-}" = -n ]; then shift; fi
+[ "${1-}" = "$DEBIAN_USB_TEST_SUDO_HELPER" ] || {
+    printf 'test sudo rejected unexpected executable: %s\n' "${1-}" >&2
+    exit 97
+}
+exec "$@"
+`
+	if err := os.WriteFile(filepath.Join(directory, "sudo"), []byte(script), 0755); err != nil {
+		t.Fatalf("write restricted sudo stub: %v", err)
+	}
+	t.Setenv("DEBIAN_USB_TEST_SUDO_HELPER", helperPath)
+	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 func TestBoolFlag(t *testing.T) {
 	if got := boolFlag(true); got != "1" {
 		t.Fatalf("expected true to encode as 1, got %q", got)
@@ -464,7 +486,7 @@ func TestExecuteCreateNeverRemastersInstallerOrTailsSources(t *testing.T) {
 	writeHelper := filepath.Join(tempDir, "writer.sh")
 	remasterMarkerPath := filepath.Join(tempDir, "remaster-used.txt")
 	writerEventsPath := filepath.Join(tempDir, "writer-events.txt")
-	pythonScript := "#!/bin/sh\nset -eu\nprintf 'used\\n' >\"" + remasterMarkerPath + "\"\nprintf '{\"iso_path\":\"/tmp/unexpected.iso\"}\\n'\n"
+	pythonScript := "#!/bin/sh\nset -eu\nif [ \"$1\" = ensure-installer-profiles ]; then printf '{}\\n'; exit 0; fi\nprintf 'used\\n' >\"" + remasterMarkerPath + "\"\nprintf '{\"iso_path\":\"/tmp/unexpected.iso\"}\\n'\n"
 	if err := os.WriteFile(pythonHelper, []byte(pythonScript), 0755); err != nil {
 		t.Fatalf("write remaster helper: %v", err)
 	}
@@ -473,7 +495,8 @@ func TestExecuteCreateNeverRemastersInstallerOrTailsSources(t *testing.T) {
 		t.Fatalf("write writer helper: %v", err)
 	}
 
-	backend := &Backend{configPath: filepath.Join(tempDir, "unused.conf"), pythonHelper: pythonHelper, writeHelper: writeHelper}
+	stubSudoForHelper(t, pythonHelper)
+	backend := &Backend{configPath: filepath.Join(tempDir, "unused.conf"), pythonHelper: pythonHelper, writeHelper: writeHelper, effectiveUID: func() int { return 1000 }}
 	for _, plan := range []CreatePlan{
 		{Profile: profileDebian, SourceRole: multiOSSourceRoleNetinst, WriteMode: writeModeManaged, ISOPath: "/tmp/netinst", MediaClass: "installer"},
 		{Profile: profileDebian, SourceRole: multiOSSourceRoleNetboot, WriteMode: writeModeManaged, ISOPath: "/tmp/netboot", MediaClass: "installer"},
@@ -495,7 +518,7 @@ func TestExecuteCreateNeverRemastersInstallerOrTailsSources(t *testing.T) {
 	}
 }
 
-func TestExecuteCreateRemastersKaliWithoutDebianHookArguments(t *testing.T) {
+func TestExecuteCreateRemastersKaliWithSharedLiveHookArguments(t *testing.T) {
 	tempDir := t.TempDir()
 	pythonHelper := filepath.Join(tempDir, "python-helper.sh")
 	writeHelper := filepath.Join(tempDir, "writer.sh")
@@ -525,8 +548,8 @@ func TestExecuteCreateRemastersKaliWithoutDebianHookArguments(t *testing.T) {
 		t.Fatalf("read remaster args: %v", err)
 	}
 	remasterArgs := string(remasterArgsRaw)
-	if strings.Contains(remasterArgs, "--live-kernel-args") || strings.Contains(remasterArgs, "live_wifi_") || strings.Contains(remasterArgs, "live-config.hooks=medium") {
-		t.Fatalf("expected Debian hook arguments to stay out of Kali remastering:\n%s", remasterArgs)
+	if !strings.Contains(remasterArgs, "--live-kernel-args") || strings.Contains(remasterArgs, "live_wifi_") || !strings.Contains(remasterArgs, "live-config.hooks=medium") {
+		t.Fatalf("expected shared Live hook arguments without Wi-Fi secrets in Kali remastering:\n%s", remasterArgs)
 	}
 }
 
@@ -540,7 +563,7 @@ func TestExecuteMultiOSCreateRemastersOnlyEligibleLiveItemsBeforeWriter(t *testi
 	planCopyPath := filepath.Join(tempDir, "executed-plan.json")
 	eventsPath := filepath.Join(tempDir, "events.txt")
 	preparedISOPath := filepath.Join(tempDir, "debian-prepared.iso")
-	pythonScript := "#!/bin/sh\nset -eu\nIFS=$(printf '\\n\\t')\nprintf 'remaster-start\\n' >>\"" + eventsPath + "\"\nprintf '%s\\n' \"$@\" >\"" + remasterArgsPath + "\"\nprintf 'prepared ISO\\n' >\"" + preparedISOPath + "\"\nprintf 'remaster-complete\\n' >>\"" + eventsPath + "\"\nprintf '{\"iso_path\":\"" + preparedISOPath + "\"}\\n'\n"
+	pythonScript := "#!/bin/sh\nset -eu\nif [ \"$1\" = ensure-installer-profiles ]; then printf '{}\\n'; exit 0; fi\nIFS=$(printf '\\n\\t')\nprintf 'remaster-start\\n' >>\"" + eventsPath + "\"\nprintf '%s\\n' \"$@\" >\"" + remasterArgsPath + "\"\nprintf 'prepared ISO\\n' >\"" + preparedISOPath + "\"\nprintf 'remaster-complete\\n' >>\"" + eventsPath + "\"\nprintf '{\"iso_path\":\"" + preparedISOPath + "\"}\\n'\n"
 	if err := os.WriteFile(pythonHelper, []byte(pythonScript), 0755); err != nil {
 		t.Fatalf("write remaster helper: %v", err)
 	}
@@ -560,7 +583,8 @@ func TestExecuteMultiOSCreateRemastersOnlyEligibleLiveItemsBeforeWriter(t *testi
 			{ID: "tails", Profile: profileTails, SourceRole: multiOSSourceRolePrimary, Title: "Tails", ISOPath: "/tmp/tails.iso", MediaClass: "live"},
 		},
 	}
-	backend := &Backend{configPath: configPath, pythonHelper: pythonHelper, writeHelper: writeHelper}
+	stubSudoForHelper(t, pythonHelper)
+	backend := &Backend{configPath: configPath, pythonHelper: pythonHelper, writeHelper: writeHelper, effectiveUID: func() int { return 1000 }}
 	if err := backend.executeMultiOSCreate(plan, "/dev/sdz", false); err != nil {
 		t.Fatalf("execute Multi-OS create: %v", err)
 	}

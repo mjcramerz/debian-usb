@@ -416,10 +416,10 @@ printf '%s\n' "${shared_builder}" | grep -Fq 'parted -s "${device}" unit MiB mkp
 printf '%s\n' "${shared_builder}" | grep -Fq 'parted -s "${device}" unit MiB mkpart "$(duw_shared_data_partlabel)" ext4 "${data_start}"' || fail "shared Multi-OS builder does not create partition 2 as the ISO store"
 # Match literal variable references in the shipped writer.
 # shellcheck disable=SC2016
-printf '%s\n' "${shared_builder}" | grep -Fq 'partition_number=3' || fail "shared Multi-OS builder does not begin persistence allocation at partition 3"
+printf '%s\n' "$(sed -n '/^duw_multios_create_persistence_partitions()/,/^)/p' "${repo_root}/scripts/write_usb.sh")" | grep -Fq 'partition_number=3' || fail "shared Multi-OS builder does not begin persistence allocation at partition 3"
 # Match literal variable references in the shipped writer.
 # shellcheck disable=SC2016
-printf '%s\n' "${shared_builder}" | grep -Fq 'duw_multios_state_set "${state_dir}" "${index}" persist_part "${persist_part}"' || fail "shared Multi-OS builder does not record a distinct partition per persistent Live item"
+printf '%s\n' "${shared_builder}" | grep -Fq 'duw_multios_create_persistence_partitions "${state_dir}" "${item_count}" "${device}" "${data_end_mib}"' || fail "shared Multi-OS builder does not record a distinct partition per persistent Live item"
 # Match literal variable references in the shipped writer.
 # shellcheck disable=SC2016
 printf '%s\n' "${iso_payload_stager}" | grep -Fq 'duw_sign_grub_data_file "${destination}"' || fail "shared ISO payloads are not signed before GRUB loopback verification"

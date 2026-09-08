@@ -60,7 +60,7 @@ class SecretsScriptTests(unittest.TestCase):
         self.repo = Path(self.temp_dir.name) / "repo"
         config_dir = self.repo / "configs"
         example_dir = self.repo / "examples"
-        preseed_dir = self.repo / "initrd/debian/netinst"
+        preseed_dir = self.repo / "initrd/debian/netinst/desktop"
         live_dir = self.repo / "initrd/debian/live"
         config_dir.mkdir(parents=True)
         example_dir.mkdir(parents=True)
@@ -79,7 +79,7 @@ class SecretsScriptTests(unittest.TestCase):
         self.original_config = (
             "# preserved comment\n"
             'DEFAULT_LIVE_WIFI_PSK="old-wifi"\n'
-            'PRESEED_ONE_ARGS_DEBIAN="auto=true  fruux_username=old-fruux-user fruux_password=old-one\t'
+            'PRESEED_ONE_ARGS_DEBIAN_DE="auto=true  fruux_username=old-fruux-user fruux_password=old-one\t'
             "primary_user=old-primary-user primary_password=old-two primary_gpg_passphrase=old-gpg-pass "
             "root_password=old-three crowdsec_token=old-four "
             "tailscale_authkey=old-five telegram_chat_id=old-six telegram_api_key=old-seven "
@@ -413,3 +413,10 @@ class SecretsScriptTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class KaliLiveSecretTargetsTests(unittest.TestCase):
+    def test_active_targets_include_both_live_families_without_installer_secret_aliases(self):
+        root = Path('/fixture')
+        targets = dict(MANAGE_SECRETS['_active_secret_targets'](root))
+        for family in ('debian', 'kali'):
+            self.assertEqual(targets[root / f'initrd/{family}/live/live.env'], ('LIVE_WIFI_PASSPHRASE',))

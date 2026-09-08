@@ -35,11 +35,11 @@ class ConfigTests(unittest.TestCase):
                 with self.subTest(legacy_name=legacy_name):
                     with self.assertRaisesRegex(
                         ValueError,
-                        rf"PRESEED_ONE_ARGS_DEBIAN contains forbidden legacy secret kernel argument.*{legacy_name}",
+                        rf"PRESEED_ONE_ARGS_DEBIAN_DE contains forbidden legacy secret kernel argument.*{legacy_name}",
                     ):
                         save_config(
                             str(config_path),
-                            {"PRESEED_ONE_ARGS_DEBIAN": f"classes=test {legacy_name}=fixture-value"},
+                            {"PRESEED_ONE_ARGS_DEBIAN_DE": f"classes=test {legacy_name}=fixture-value"},
                         )
 
     def test_update_default_persistence_size_rewrites_config(self) -> None:
@@ -60,7 +60,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(payload["default_persistence_size_gib"], 8)
             self.assertEqual(payload["default_boot_policy"], "balanced")
             self.assertEqual(payload["default_installer_policy"], "installer-preseed")
-            self.assertEqual(payload["profile_preseed_urls"]["debian"], loaded["DEBIAN_PRESEED_INTERNAL_URL"])
+            self.assertEqual(payload["profile_preseed_urls"]["debian"], loaded["DEBIAN_DE_PRESEED_INTERNAL_URL"])
             self.assertFalse(payload["default_live_toram"])
             self.assertEqual(payload["default_live_mem_gib"], 0)
             self.assertTrue(payload["default_live_hooks"])
@@ -85,8 +85,8 @@ class ConfigTests(unittest.TestCase):
                 "DEFAULT_LIVE_WIFI_PSK",
             ):
                 self.assertNotIn(key, loaded)
-            self.assertEqual(payload["debian_preseed_public_url"], loaded["DEBIAN_PRESEED_PUBLIC_URL"])
-            self.assertEqual(payload["debian_preseed_public_args"], loaded["DEBIAN_PRESEED_PUBLIC_ARGS"])
+            self.assertEqual(payload["debian_preseed_public_url"], loaded["DEBIAN_DE_PRESEED_PUBLIC_URL"])
+            self.assertEqual(payload["debian_preseed_public_args"], loaded["DEBIAN_DE_PRESEED_PUBLIC_ARGS"])
             self.assertEqual(payload["debian_preseed_internal_args"], "")
             self.assertEqual(payload["default_partition_labels"]["DEFAULT_ESP_LABEL"], "ESPBOOT")
             self.assertEqual(payload["default_partition_labels"]["DEFAULT_DEBIAN_NETINST_LABEL"], "DEBIAN-NETINST")
@@ -98,7 +98,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(payload["default_installer_kernel_extras"], "")
             self.assertEqual(payload["default_forensics_kernel_extras"], "")
             self.assertEqual(payload["preseed_common_kernel_args"], loaded["PRESEED_COMMON_KERNEL_ARGS"])
-            self.assertEqual(payload["preseed_usb_files"]["debian"], loaded["PRESEED_USB_DEBIAN_FILE"])
+            self.assertEqual(payload["preseed_usb_files"]["debian"], loaded["PRESEED_USB_DEBIAN_DE_FILE"])
             self.assertEqual(payload["preseed_host_paths"]["kali-purple"], loaded["PRESEED_HOST_PURPLE_PATH"])
             self.assertEqual(
                 payload["profile_live_kernel_extras"]["debian"],
@@ -132,16 +132,16 @@ class ConfigTests(unittest.TestCase):
             save_config(
                 str(config_path),
                 {
-                    "DEBIAN_PRESEED_PUBLIC_ARGS": "",
-                    "DEBIAN_PRESEED_INTERNAL_ARGS": "",
+                    "DEBIAN_DE_PRESEED_PUBLIC_ARGS": "",
+                    "DEBIAN_DE_PRESEED_INTERNAL_ARGS": "",
                 },
             )
 
             loaded = load_config(str(config_path))
             payload = runtime_config(str(config_path))
 
-            self.assertEqual(loaded["DEBIAN_PRESEED_PUBLIC_ARGS"], "")
-            self.assertEqual(loaded["DEBIAN_PRESEED_INTERNAL_ARGS"], "")
+            self.assertEqual(loaded["DEBIAN_DE_PRESEED_PUBLIC_ARGS"], "")
+            self.assertEqual(loaded["DEBIAN_DE_PRESEED_INTERNAL_ARGS"], "")
             self.assertEqual(payload["debian_preseed_public_args"], "")
             self.assertEqual(payload["debian_preseed_internal_args"], "")
 
@@ -149,20 +149,20 @@ class ConfigTests(unittest.TestCase):
                 str(config_path),
                 {
                     **loaded,
-                    "DEBIAN_PRESEED_PUBLIC_ARGS": (
+                    "DEBIAN_DE_PRESEED_PUBLIC_ARGS": (
                         "  debian-installer/allow_unauthenticated_ssl=true   public-only=1  "
                     ),
-                    "DEBIAN_PRESEED_INTERNAL_ARGS": "  internal-only=1  ",
+                    "DEBIAN_DE_PRESEED_INTERNAL_ARGS": "  internal-only=1  ",
                 },
             )
             loaded = load_config(str(config_path))
             payload = runtime_config(str(config_path))
 
             self.assertEqual(
-                loaded["DEBIAN_PRESEED_PUBLIC_ARGS"],
+                loaded["DEBIAN_DE_PRESEED_PUBLIC_ARGS"],
                 "debian-installer/allow_unauthenticated_ssl=true public-only=1",
             )
-            self.assertEqual(loaded["DEBIAN_PRESEED_INTERNAL_ARGS"], "internal-only=1")
+            self.assertEqual(loaded["DEBIAN_DE_PRESEED_INTERNAL_ARGS"], "internal-only=1")
             self.assertEqual(
                 payload["debian_preseed_public_args"],
                 "debian-installer/allow_unauthenticated_ssl=true public-only=1",
@@ -200,7 +200,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded["DEFAULT_LIVE_MEM_GIB"], "6")
             self.assertEqual(loaded["DEFAULT_BOOT_POLICY"], "performance")
             self.assertEqual(loaded["DEFAULT_INSTALLER_POLICY"], "preserve")
-            self.assertEqual(loaded["DEBIAN_PRESEED_INTERNAL_URL"], "https://example.test/preseed.cfg")
+            self.assertEqual(loaded["DEBIAN_DE_PRESEED_INTERNAL_URL"], "https://example.test/preseed.cfg")
             self.assertEqual(loaded["DEFAULT_LIVE_KERNEL_EXTRAS"], "foo=bar toram")
             self.assertEqual(loaded["DEFAULT_INSTALLER_KERNEL_EXTRAS"], "auto=true priority=critical")
             self.assertEqual(loaded["DEFAULT_FORENSICS_KERNEL_EXTRAS"], "forensic=true rd.shell=0")
@@ -226,11 +226,11 @@ class ConfigTests(unittest.TestCase):
             self.assertIn('DEFAULT_BOOT_POLICY="hardened"', rendered)
             self.assertIn('BOOT_POLICY_HARDENED_KERNEL_ARGS="', rendered)
             self.assertIn('PRESEED_COMMON_KERNEL_ARGS="', rendered)
-            self.assertIn('DEBIAN_PRESEED_PUBLIC_ARGS="', rendered)
-            self.assertEqual(saved["DEBIAN_PRESEED_PUBLIC_ARGS"], template["DEBIAN_PRESEED_PUBLIC_ARGS"])
-            self.assertIn('DEBIAN_PRESEED_INTERNAL_ARGS=""', rendered)
-            self.assertIn('PRESEED_USB_DEBIAN_FILE="', rendered)
-            self.assertIn('PRESEED_HOST_KALI_PATH="', rendered)
+            self.assertIn('DEBIAN_DE_PRESEED_PUBLIC_ARGS="', rendered)
+            self.assertEqual(saved["DEBIAN_DE_PRESEED_PUBLIC_ARGS"], template["DEBIAN_DE_PRESEED_PUBLIC_ARGS"])
+            self.assertIn('DEBIAN_DE_PRESEED_INTERNAL_ARGS=""', rendered)
+            self.assertIn('PRESEED_USB_DEBIAN_DE_FILE="', rendered)
+            self.assertNotIn('PRESEED_HOST_KALI_DE_PATH=', rendered)
             self.assertIn('DEBIAN_FALLBACK_LIVE_KERNEL_ARGS="', rendered)
             self.assertIn('UBUNTU_SERVER_LIVE_KERNEL_EXTRAS=""', rendered)
             self.assertIn('DEFAULT_LIVE_HOOKS="1"', rendered)
@@ -261,7 +261,7 @@ class ConfigTests(unittest.TestCase):
             spec_dir = root / "spec"
             spec_dir.mkdir()
             debian_spec = json.loads(Path("configs/spec/grub/debian.json").read_text(encoding="utf-8"))
-            debian_spec["preseed"]["preset_sets"]["debian"].append(
+            debian_spec["preseed"]["preset_sets"]["debian-de"].append(
                 {
                     "label": " (ROLE=TEST,GPU=Nvidia,NET=DHCP,BOOT=Dualboot)",
                     "args_key": "PRESEED_ELEVEN_ARGS_DEBIAN",
@@ -280,7 +280,7 @@ class ConfigTests(unittest.TestCase):
             spec_dir = root / "spec"
             spec_dir.mkdir()
             debian_spec = json.loads(Path("configs/spec/grub/debian.json").read_text(encoding="utf-8"))
-            debian_spec["preseed"]["preset_sets"]["debian"].append(
+            debian_spec["preseed"]["preset_sets"]["debian-de"].append(
                 {
                     "label": " (ROLE=TEST,GPU=Nvidia,NET=DHCP,BOOT=Dualboot)",
                     "args_key": "PRESEED_ELEVEN_ARGS_DEBIAN",
@@ -393,34 +393,34 @@ class ConfigTests(unittest.TestCase):
                         'BOOT_POLICY_PERFORMANCE_KERNEL_ARGS="performance=1"',
                         'BOOT_POLICY_HARDENED_KERNEL_ARGS="hardened=1"',
                         'PRESEED_COMMON_KERNEL_ARGS="preseed-common=1"',
-                        'PRESEED_USB_DEBIAN_FILE="/hd-media/preseed/debian/preseed.cfg"',
-                        'PRESEED_USB_KALI_FILE="/hd-media/preseed/kali/preseed.cfg"',
+                        'PRESEED_USB_DEBIAN_DE_FILE="/hd-media/debian-preseed-de/preseed.cfg"',
+                        'PRESEED_USB_KALI_DE_FILE="/hd-media/kali-preseed-de/preseed.cfg"',
                         'PRESEED_USB_PURPLE_FILE="/hd-media/preseed/purple/preseed.cfg"',
-                        'PRESEED_HOST_DEBIAN_PATH="/data/cfg/preseed/debian"',
-                        'PRESEED_HOST_KALI_PATH="/data/cfg/preseed/kali"',
+                        'PRESEED_HOST_DEBIAN_DE_PATH="/data/cfg/preseed/debian"',
+                        'PRESEED_HOST_KALI_DE_PATH="/data/cfg/preseed/kali"',
                         'PRESEED_HOST_PURPLE_PATH="/data/cfg/preseed/purple"',
-                        'DEBIAN_PRESEED_PUBLIC_URL="https://example.test/public-preseed.cfg"',
-                        'DEBIAN_PRESEED_PUBLIC_ARGS="debian-installer/allow_unauthenticated_ssl=true"',
-                        'DEBIAN_PRESEED_INTERNAL_ARGS=""',
-                        'DEBIAN_PRESEED_INTERNAL_URL="https://example.test/debian-preseed.cfg"',
-                        'PRESEED_ONE_ARGS_DEBIAN="deb-one"',
-                        'PRESEED_TWO_ARGS_DEBIAN="deb-two"',
-                        'PRESEED_THREE_ARGS_DEBIAN="deb-three"',
-                        'PRESEED_FOUR_ARGS_DEBIAN="deb-four"',
-                        'PRESEED_FIVE_ARGS_DEBIAN="deb-five"',
-                        'PRESEED_SIX_ARGS_DEBIAN="deb-six"',
-                        'PRESEED_SEVEN_ARGS_DEBIAN="deb-seven"',
-                        'PRESEED_EIGHT_ARGS_DEBIAN="deb-eight"',
-                        'PRESEED_NINE_ARGS_DEBIAN="deb-nine"',
-                        'PRESEED_ONE_ARGS_KALI="kali-one"',
-                        'PRESEED_TWO_ARGS_KALI="kali-two"',
-                        'PRESEED_THREE_ARGS_KALI="kali-three"',
-                        'PRESEED_FOUR_ARGS_KALI="kali-four"',
-                        'PRESEED_FIVE_ARGS_KALI="kali-five"',
-                        'PRESEED_SIX_ARGS_KALI="kali-six"',
-                        'PRESEED_SEVEN_ARGS_KALI="kali-seven"',
-                        'PRESEED_EIGHT_ARGS_KALI="kali-eight"',
-                        'PRESEED_NINE_ARGS_KALI="kali-nine"',
+                        'DEBIAN_DE_PRESEED_PUBLIC_URL="https://example.test/public-preseed.cfg"',
+                        'DEBIAN_DE_PRESEED_PUBLIC_ARGS="debian-installer/allow_unauthenticated_ssl=true"',
+                        'DEBIAN_DE_PRESEED_INTERNAL_ARGS=""',
+                        'DEBIAN_DE_PRESEED_INTERNAL_URL="https://example.test/debian-preseed.cfg"',
+                        'PRESEED_ONE_ARGS_DEBIAN_DE="deb-one"',
+                        'PRESEED_TWO_ARGS_DEBIAN_DE="deb-two"',
+                        'PRESEED_THREE_ARGS_DEBIAN_DE="deb-three"',
+                        'PRESEED_FOUR_ARGS_DEBIAN_DE="deb-four"',
+                        'PRESEED_FIVE_ARGS_DEBIAN_DE="deb-five"',
+                        'PRESEED_SIX_ARGS_DEBIAN_DE="deb-six"',
+                        'PRESEED_SEVEN_ARGS_DEBIAN_DE="deb-seven"',
+                        'PRESEED_EIGHT_ARGS_DEBIAN_DE="deb-eight"',
+                        'PRESEED_NINE_ARGS_DEBIAN_DE="deb-nine"',
+                        'PRESEED_ONE_ARGS_KALI_DE="kali-one"',
+                        'PRESEED_TWO_ARGS_KALI_DE="kali-two"',
+                        'PRESEED_THREE_ARGS_KALI_DE="kali-three"',
+                        'PRESEED_FOUR_ARGS_KALI_DE="kali-four"',
+                        'PRESEED_FIVE_ARGS_KALI_DE="kali-five"',
+                        'PRESEED_SIX_ARGS_KALI_DE="kali-six"',
+                        'PRESEED_SEVEN_ARGS_KALI_DE="kali-seven"',
+                        'PRESEED_EIGHT_ARGS_KALI_DE="kali-eight"',
+                        'PRESEED_NINE_ARGS_KALI_DE="kali-nine"',
                         'DEFAULT_LIVE_KERNEL_EXTRAS=""',
                         'DEFAULT_INSTALLER_KERNEL_EXTRAS=""',
                         'DEFAULT_FORENSICS_KERNEL_EXTRAS=""',
@@ -452,10 +452,11 @@ class ConfigTests(unittest.TestCase):
 
     def test_template_config_keeps_kali_preseed_preset_slots_defined(self) -> None:
         payload = load_template_config()
-        self.assertEqual(payload["PRESEED_ONE_ARGS_KALI"], "")
+        self.assertEqual(payload["PRESEED_ONE_ARGS_KALI_DE"], "")
         for number_name in ("ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE"):
-            self.assertIn(f"PRESEED_{number_name}_ARGS_KALI", payload)
-            self.assertIn(f"PRESEED_{number_name}_ARGS_DEBIAN", payload)
+            for family in ("KALI", "DEBIAN"):
+                for suffix in ("DE", "SRV"):
+                    self.assertIn(f"PRESEED_{number_name}_ARGS_{family}_{suffix}", payload)
 
     def test_profile_payload_labels_use_explicit_netboot_labels(self) -> None:
         payload = load_template_config()
@@ -471,3 +472,31 @@ class ConfigTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class ManualHDMediaConfigTests(unittest.TestCase):
+    def test_split_host_paths_are_absent_from_template_and_loaded_config(self):
+        retired = ('PRESEED_HOST_DEBIAN_DE_PATH', 'PRESEED_HOST_DEBIAN_SRV_PATH',
+                   'PRESEED_HOST_KALI_DE_PATH', 'PRESEED_HOST_KALI_SRV_PATH')
+        template = load_template_config()
+        for key in retired:
+            self.assertNotIn(key, template)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'debian-usb.conf'
+            save_config(str(path), {})
+            values = load_config(str(path))
+            for key in retired:
+                self.assertNotIn(key, values)
+            self.assertEqual(runtime_config(str(path))['preseed_host_paths']['debian'], '')
+            self.assertEqual(runtime_config(str(path))['preseed_host_paths']['kali-linux'], '')
+
+    def test_legacy_split_host_paths_are_dropped_not_reintroduced(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'debian-usb.conf'
+            save_config(str(path), {'PRESEED_HOST_DEBIAN_DE_PATH': '/not/required/preseed.cfg',
+                                    'PRESEED_HOST_DEBIAN_SRV_PATH': '/not/required/preseed.cfg',
+                                    'PRESEED_HOST_KALI_DE_PATH': '/not/required/preseed.cfg',
+                                    'PRESEED_HOST_KALI_SRV_PATH': '/not/required/preseed.cfg'})
+            text = path.read_text(encoding='utf-8')
+            self.assertNotIn('PRESEED_HOST_DEBIAN_', text)
+            self.assertNotIn('PRESEED_HOST_KALI_', text)
+            load_config(str(path))

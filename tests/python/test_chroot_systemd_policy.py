@@ -76,7 +76,7 @@ class ChrootSystemdPolicyTests(unittest.TestCase):
                  patch.object(rebuild_iso, "_mounted_chroot", return_value=nullcontext()), \
                  patch.object(rebuild_iso, "_run_in_chroot", side_effect=apt):
                 rebuild_iso._install_packages_in_chroot(root, ["fwupd"], None)
-            self.assertEqual(calls, ["update", "install"] if failure else ["update", "install", "clean"])
+            self.assertEqual(calls, ["update", "install"] if failure else ["update", "install", "install", "clean"])
             for unit in LIVE_SYSTEMD_MASK_UNITS:
                 self.assertEqual((systemd / unit).readlink(), Path("/dev/null"))
             self.assertFalse((systemd / "timers.target.wants/fwupd-refresh.timer").is_symlink())
