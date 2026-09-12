@@ -28,7 +28,7 @@
       ],
       "debian-srv": [
         {
-          "label": " [BTRFS Server - GitLab Runner]",
+          "label": " [BTRFS Server][HP][Gitlab-Runner + GitHub-Runner][479GiB Disk + 7489MiB RAM]",
           "args_key": "PRESEED_ONE_ARGS_DEBIAN_SRV"
         },
         {
