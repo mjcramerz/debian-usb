@@ -194,6 +194,24 @@ dusb_install_tree() (
   cp -a -- "${src}/." "${dst}/"
 )
 
+dusb_protect_initrd_tree() (
+  root="$1"
+  [ -d "${root}" ] || dusb_die "missing installed initrd tree: ${root}"
+
+  if ! find "${root}" -type f -exec sh -c '
+    for initrd_file do
+      if [ -x "${initrd_file}" ]; then
+        chmod 0700 -- "${initrd_file}" || exit 1
+      else
+        chmod 0600 -- "${initrd_file}" || exit 1
+      fi
+    done
+  ' sh {} +; then
+    dusb_die "failed to protect installed initrd files"
+  fi
+  find "${root}" -type d -exec chmod 0711 -- {} + || dusb_die "failed to protect installed initrd directories"
+)
+
 dusb_assign_runtime_owner() (
   path="$1"
   runtime_uid="${DUSB_RUNTIME_UID:-${SUDO_UID:-}}"
@@ -260,8 +278,8 @@ dusb_install() (
   dusb_install_tree "${repo_root}/configs/preseed" "${preseeddir}"
   dusb_install_tree "${repo_root}/initrd" "${initrddir}"
   for family in debian kali; do
-    if [ -f "${initrddir}/${family}/live/live.env" ]; then
-      chmod 0600 "${initrddir}/${family}/live/live.env" || dusb_die "failed to protect Live environment file"
+    if [ -d "${initrddir}/${family}" ]; then
+      dusb_protect_initrd_tree "${initrddir}/${family}"
     fi
   done
   install -m 0644 -- "${repo_root}/configs/persistence-debian.conf" "${persistencedir}/debian.conf"

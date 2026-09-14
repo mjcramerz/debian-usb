@@ -270,10 +270,15 @@ and repacking the same copy. An extracted tree is never cloned using Python
 `shutil.copytree()`: that API cannot preserve character/block devices and FIFOs,
 and does not preserve the hard links needed for a faithful tree clone.
 
+Regular files originating in a selected d-i profile overlay are normalized to
+mode `0600` before repacking. Files that carried an executable bit are instead
+set to `0700`; symlinks are preserved and never followed for permission changes.
+
 Repacking the existing archive retains its detected compression and original
 leading early-cpio bytes, even when its filename ends in `.gz` but its payload
 uses a different supported compression. Final archive ownership is normalized to
-root by the existing cpio writer; original archive/file permissions are preserved.
+root by the existing cpio writer. Upstream initrd permissions are preserved, while
+selected overlay regular files use the private mode policy described above.
 The immutable input and any previous complete profile pair survive a failed
 profile-only preparation. The encompassing full-source rebuild should still use
 a new managed bundle rather than overwrite a known-good bundle in place.

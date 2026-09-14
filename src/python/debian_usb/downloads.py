@@ -304,13 +304,21 @@ def download_managed_source(config_path: str, key: str, *, expected_url: str = "
     if expected_url and configured_url != expected_url:
         raise ValueError(f"managed source URL changed since review: {key}; review the plan again")
     cached_destination = _cached_managed_destination(key)
-    # Reviewed plans may not silently reuse a different ISO from this URL key.
+    # Reviewed plans may not silently reuse different bytes from this URL key.
+    # A manifest-resolved ISO URL identifies one release even when its directory
+    # contains /current/. Unresolved moving aliases (notably Debian installer
+    # vmlinuz/initrd assets) do not, so refresh them before alignment preflight.
     # Legacy direct callers retain their offline cache-first behavior.
     resolved = None
     if expected_url:
         resolved = _resolve_current_release_iso_url(configured_url)
-        if cached_destination is not None and _cached_source_url(cached_destination, "") != resolved[0]:
-            cached_destination = None
+        if cached_destination is not None:
+            resolved_url, manifest_resolved = resolved
+            if _cached_source_url(cached_destination, "") != resolved_url:
+                cached_destination = None
+            elif not manifest_resolved and _source_url_uses_moving_alias(resolved_url):
+                _status(f"[download] {key}: refreshing cached file from moving source URL {resolved_url}")
+                cached_destination = None
     if cached_destination is not None:
         _status(f"[download] {key}: using cached file {cached_destination}")
         return {

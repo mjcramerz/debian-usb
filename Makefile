@@ -109,6 +109,11 @@ check:
 	cp -a "$(CURDIR)/README.md" "$$repo_fixture/README.md"; \
 	cp -a "$(CURDIR)/initrd/debian/live" "$$repo_fixture/initrd/debian/live"; \
 	cp -a "$(CURDIR)/initrd/kali/live" "$$repo_fixture/initrd/kali/live"; \
+	install -d "$$repo_fixture/initrd/debian/netinst/desktop/scripts"; \
+	printf '%s\n' 'PRESEED_ROOT_PASSWORD=' >"$$repo_fixture/initrd/debian/netinst/desktop/preseed.env"; \
+	printf '%s\n' '#!/bin/sh' 'exit 0' >"$$repo_fixture/initrd/debian/netinst/desktop/scripts/private-helper"; \
+	chmod 0660 "$$repo_fixture/initrd/debian/netinst/desktop/preseed.env"; \
+	chmod 0750 "$$repo_fixture/initrd/debian/netinst/desktop/scripts/private-helper"; \
 	go build -o "$$repo_fixture/build/debian-usb" ./cmd/debian-usb; \
 	( cd "$$tmpdir" && DESTDIR="$$tmpdir/stage" sh "$$repo_fixture/scripts/make-host.sh" install >/dev/null ); \
 		test -x "$$tmpdir/stage/usr/bin/debian-usb"; \
@@ -124,6 +129,9 @@ check:
 		test "$$(stat -c '%a' "$$tmpdir/stage/usr/lib/debian-usb/initrd/kali/live/live.env")" = 600; \
 		test -f "$$tmpdir/stage/usr/lib/debian-usb/initrd/debian/live/live.env"; \
 		test "$$(stat -c '%a' "$$tmpdir/stage/usr/lib/debian-usb/initrd/debian/live/live.env")" = 600; \
+		test "$$(stat -c '%a' "$$tmpdir/stage/usr/lib/debian-usb/initrd/debian/netinst/desktop/preseed.env")" = 600; \
+		test "$$(stat -c '%a' "$$tmpdir/stage/usr/lib/debian-usb/initrd/debian/netinst/desktop/scripts/private-helper")" = 700; \
+		test "$$(stat -c '%a' "$$tmpdir/stage/usr/lib/debian-usb/initrd/debian/netinst/desktop")" = 711; \
 		grep -q '^LIVE_WIFI_PASSPHRASE=' "$$tmpdir/stage/usr/lib/debian-usb/initrd/debian/live/live.env"; \
 		! grep -q '^PRESEED_WIFI_PASSPHRASE=' "$$tmpdir/stage/usr/lib/debian-usb/initrd/debian/live/live.env"; \
 		test -x "$$tmpdir/stage/usr/lib/debian-usb/initrd/debian/live/scripts/init-bottom/debian-usb-live-env"; \

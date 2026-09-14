@@ -3,6 +3,8 @@ configs/debian-usb.conf.*
 examples/
 initrd/debian/netinst/desktop/*.asc
 initrd/debian/netinst/server/*.asc
+initrd/debian/netinst/desktop/git_ed25519*
+initrd/debian/netinst/server/git_ed25519*
 apt-update
 .mypy_cache/
 docs/validation/

@@ -16,6 +16,29 @@ from typing import Any
 FAMILIES = {"debian": "debian", "kali-linux": "kali"}
 FLAVORS = {"desktop": "de", "server": "srv"}
 PROFILE_ASSET_DIR = ".debian-usb/installer-profiles"
+PRIVATE_OVERLAY_FILE_MODE = 0o600
+PRIVATE_OVERLAY_EXECUTABLE_MODE = 0o700
+
+
+def _protect_installer_overlay_files(source_root: Path, initrd_root: Path) -> None:
+    """Make copied profile files root-only without following overlay symlinks."""
+    for source_path in sorted(source_root.rglob("*"), key=lambda path: path.as_posix()):
+        source_mode = source_path.lstat().st_mode
+        if not stat.S_ISREG(source_mode):
+            continue
+        relative_path = source_path.relative_to(source_root)
+        destination_path = initrd_root / relative_path
+        destination_mode = destination_path.lstat().st_mode
+        if not stat.S_ISREG(destination_mode):
+            raise RuntimeError(
+                f"installer overlay regular file was not copied as a regular file: {relative_path}"
+            )
+        private_mode = (
+            PRIVATE_OVERLAY_EXECUTABLE_MODE
+            if source_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            else PRIVATE_OVERLAY_FILE_MODE
+        )
+        os.chmod(destination_path, private_mode, follow_symlinks=False)
 
 
 def supports_installer_profiles(profile: str, source_role: str) -> bool:
@@ -241,9 +264,14 @@ def prepare_installer_profiles(bundle_root: Path, profile: str, source_role: str
             selected = overlay_root / flavor if overlay_root is not None else None
             if selected is not None and selected.is_dir():
                 merge_initrd_overlay(selected, expanded)
+                _protect_installer_overlay_files(selected, expanded)
                 (expanded / ".gitkeep").unlink(missing_ok=True)
             if flavor == "desktop" and desktop_preseed is not None:
-                shutil.copy2(desktop_preseed, expanded / "preseed.cfg")
+                preseed_target = expanded / "preseed.cfg"
+                if preseed_target.is_symlink():
+                    raise ValueError("refusing symlinked embedded preseed destination")
+                shutil.copy2(desktop_preseed, preseed_target)
+                os.chmod(preseed_target, PRIVATE_OVERLAY_FILE_MODE, follow_symlinks=False)
             try:
                 transport = _install_transport_dispatch(expanded, source_role)
             except (OSError, ValueError) as exc:

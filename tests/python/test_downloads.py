@@ -42,6 +42,54 @@ class DownloadTests(unittest.TestCase):
                 self.assertEqual(destination.read_bytes(), b"reviewed")
                 fetched.assert_called_once()
 
+    def test_reviewed_url_refreshes_cached_payload_from_moving_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            key = "DEBIAN_NETINST_INITRD_STABLE_URL"
+            url = "https://ftp.debian.org/debian/dists/stable/main/installer-amd64/current/images/hd-media/initrd.gz"
+            with patch.object(downloads, "BOOT_ASSET_DOWNLOAD_DIR", root), patch.object(
+                downloads, "_managed_source_url", return_value=url
+            ):
+                destination = downloads._download_destination(key, url)
+                destination.parent.mkdir(parents=True)
+                destination.write_bytes(b"stale")
+                downloads._write_cached_source_url(destination, url)
+
+                def fetch(_url: str, path: Path) -> None:
+                    self.assertEqual(_url, url)
+                    path.write_bytes(b"fresh")
+
+                stderr = io.StringIO()
+                with patch.object(downloads, "_download_http", side_effect=fetch) as fetched, patch(
+                    "sys.stderr", stderr
+                ):
+                    result = downloads.download_managed_source("config", key, expected_url=url)
+
+                self.assertFalse(result["cached"])
+                self.assertEqual(destination.read_bytes(), b"fresh")
+                self.assertIn("refreshing cached file from moving source URL", stderr.getvalue())
+                fetched.assert_called_once()
+
+    def test_reviewed_url_reuses_matching_cache_from_pinned_url(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            key = "DEBIAN_NETINST_INITRD_TESTING_URL"
+            url = "https://d-i.debian.org/daily-images/amd64/20260914-00:15/hd-media/initrd.gz"
+            with patch.object(downloads, "BOOT_ASSET_DOWNLOAD_DIR", root), patch.object(
+                downloads, "_managed_source_url", return_value=url
+            ):
+                destination = downloads._download_destination(key, url)
+                destination.parent.mkdir(parents=True)
+                destination.write_bytes(b"pinned")
+                downloads._write_cached_source_url(destination, url)
+
+                with patch.object(downloads, "_download_http") as fetched:
+                    result = downloads.download_managed_source("config", key, expected_url=url)
+
+                self.assertTrue(result["cached"])
+                self.assertEqual(Path(result["path"]).read_bytes(), b"pinned")
+                fetched.assert_not_called()
+
     def test_download_managed_source_scopes_cache_by_key(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -400,13 +448,15 @@ class DownloadTests(unittest.TestCase):
                     first = downloads.download_managed_source(
                         "configs/debian-usb.conf",
                         "DEBIAN_LIVE_ISO_STABLE_URL",
+                        expected_url=configured_url,
                     )
                     second = downloads.download_managed_source(
                         "configs/debian-usb.conf",
                         "DEBIAN_LIVE_ISO_STABLE_URL",
+                        expected_url=configured_url,
                     )
 
-                    self.assertEqual(download_small_text.call_count, 1)
+                    self.assertEqual(download_small_text.call_count, 2)
                     self.assertEqual(download_http.call_count, 1)
                     download_torrent.assert_not_called()
             finally:

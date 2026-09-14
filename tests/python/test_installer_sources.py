@@ -965,6 +965,10 @@ class InstallerSourceTests(unittest.TestCase):
         self.assertEqual(manifest["rebuild_mode"], "builtin-support")
         self.assertFalse(manifest["changed"])
         self.assertEqual(manifest["builtin_options"], ["xxhash_generic"])
+        inspect_kernel_support.assert_called_once()
+        inspection_kwargs = inspect_kernel_support.call_args.kwargs
+        self.assertEqual(inspection_kwargs["kernel_version"], "7.0.13+deb14-amd64")
+        self.assertTrue(inspection_kwargs["download_if_missing"])
 
     @patch("debian_usb.installer_sources._detect_kernel_version_from_kernel_file", return_value="6.12.86+deb13-amd64")
     @patch("debian_usb.installer_sources._detect_kernel_version_from_file", return_value="7.0.13+deb14-amd64")

@@ -71,10 +71,13 @@ class InstallerProfileTests(unittest.TestCase):
                         tree = overlay / flavor
                         (tree / 'etc').mkdir(parents=True)
                         (tree / 'preseed.cfg').write_text(f'# {flavor}\n', encoding='utf-8')
+                        (tree / 'preseed.cfg').chmod(0o660)
                         (tree / f'{flavor}-only').write_text(flavor, encoding='utf-8')
                         (tree / '.hidden').write_text('included', encoding='utf-8')
                         (tree / 'etc/private').write_text('test fixture', encoding='utf-8')
                         (tree / 'etc/private').chmod(0o600)
+                        (tree / 'run-private').write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
+                        (tree / 'run-private').chmod(0o755)
                         (tree / 'alias').symlink_to(f'{flavor}-only')
                     bundle = self.bundle(profile, role, overlay)
                     manifests = validate_installer_profile_assets(str(bundle), profile, role)
@@ -87,9 +90,42 @@ class InstallerProfileTests(unittest.TestCase):
                         self.assertFalse((expanded / f'{other}-only').exists())
                         self.assertTrue((expanded / '.hidden').is_file())
                         self.assertTrue((expanded / 'alias').is_symlink())
+                        self.assertEqual(stat.S_IMODE((expanded / 'preseed.cfg').stat().st_mode), 0o600)
+                        self.assertEqual(stat.S_IMODE((expanded / f'{flavor}-only').stat().st_mode), 0o600)
+                        self.assertEqual(stat.S_IMODE((expanded / '.hidden').stat().st_mode), 0o600)
                         self.assertEqual(stat.S_IMODE((expanded / 'etc/private').stat().st_mode), 0o600)
+                        self.assertEqual(stat.S_IMODE((expanded / 'run-private').stat().st_mode), 0o700)
                         self.assertTrue(manifests[flavor]['embedded_preseed'])
                         self.assertEqual(manifests[flavor]['usb_directory'], f'/{profile.replace("-linux", "")}-{role}-{suffix}')
+
+    def test_legacy_desktop_preseed_is_embedded_with_private_mode(self) -> None:
+        role_root = self.root / 'debian-netboot'
+        role_root.mkdir()
+        kernel = role_root / 'downloaded-vmlinuz'
+        initrd = role_root / 'downloaded-initrd.gz'
+        kernel.write_bytes(b'kernel\n')
+        write_installer_initrd(initrd)
+        asset_dir = role_root / 'netboot'
+        asset_dir.mkdir()
+        shutil.copy2(kernel, asset_dir / 'vmlinuz')
+        shutil.copy2(initrd, asset_dir / 'initrd.gz')
+        preseed = self.root / 'legacy-preseed.cfg'
+        preseed.write_text('d-i debian-installer/locale string en_US.UTF-8\n', encoding='utf-8')
+        preseed.chmod(0o644)
+
+        prepare_installer_profiles(
+            role_root,
+            'debian',
+            'netboot',
+            desktop_preseed=preseed,
+        )
+
+        expanded = self.root / 'expanded-legacy-desktop'
+        _extract_initrd_archive(role_root / PROFILE_ASSET_DIR / 'desktop/initrd.gz', expanded)
+        self.assertEqual(stat.S_IMODE((expanded / 'preseed.cfg').stat().st_mode), 0o600)
+        server = self.root / 'expanded-legacy-server'
+        _extract_initrd_archive(role_root / PROFILE_ASSET_DIR / 'server/initrd.gz', server)
+        self.assertFalse((server / 'preseed.cfg').exists())
 
     def test_shipped_overlay_trees_prepare_for_all_installer_roles(self) -> None:
         repo = Path(__file__).resolve().parents[2]
@@ -99,6 +135,10 @@ class InstallerProfileTests(unittest.TestCase):
                     bundle = self.bundle(profile, role, repo / "initrd" / family / role)
                     manifest = validate_installer_profile_assets(str(bundle), profile, role)
                     self.assertEqual(set(manifest), {"desktop", "server"})
+                    if profile == "debian" and role == "netinst":
+                        expanded = self.root / "expanded-shipped-debian-netinst-desktop"
+                        _extract_initrd_archive(bundle / PROFILE_ASSET_DIR / "desktop/initrd.gz", expanded)
+                        self.assertEqual(stat.S_IMODE((expanded / "preseed.env").stat().st_mode), 0o600)
 
     def test_profile_validation_rejects_wrong_source_identity(self) -> None:
         bundle = self.bundle()
