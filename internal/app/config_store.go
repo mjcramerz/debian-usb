@@ -22,58 +22,7 @@ var (
 	forensicsOverrideProfiles  = []string{profileDebian, profileUbuntuDesktop, profileUbuntuServer, profileKaliLinux, profileTails}
 	fallbackLiveKernelProfiles = []string{profileDebian, profileUbuntuDesktop, profileUbuntuServer, profileKaliLinux, profileTails}
 	preseedURLProfiles         = []string{profileDebian, profileKaliLinux, profileKaliPurple}
-	legacySecretKernelArgNames = map[string]struct{}{
-		"fruux_username":         {},
-		"fruux_password":         {},
-		"primary_user":           {},
-		"primary_password":       {},
-		"primary_gpg_passphrase": {},
-		"root_password":          {},
-		"crowdsec_token":         {},
-		"tailscale_authkey":      {},
-		"telegram_chat_id":       {},
-		"telegram_api_key":       {},
-		"cf_r2_access_key":       {},
-		"cf_r2_secret_key":       {},
-		"obs_username":           {},
-		"obs_password":           {},
-	}
-	liveWifiSecretKernelArgNames = map[string]struct{}{
-		"DEFAULT_LIVE_WIFI_INTERFACE":   {},
-		"DEFAULT_LIVE_WIFI_ESSID":       {},
-		"DEFAULT_LIVE_WIFI_SECURITY":    {},
-		"DEFAULT_LIVE_WIFI_CIDR":        {},
-		"DEFAULT_LIVE_WIFI_GATEWAY":     {},
-		"DEFAULT_LIVE_WIFI_NAMESERVERS": {},
-		"DEFAULT_LIVE_WIFI_PSK":         {},
-		"LIVE_WIFI_INTERFACE":           {},
-		"LIVE_WIFI_ESSID":               {},
-		"LIVE_WIFI_SECURITY":            {},
-		"LIVE_WIFI_CIDR":                {},
-		"LIVE_WIFI_GATEWAY":             {},
-		"LIVE_WIFI_NAMESERVERS":         {},
-		"LIVE_WIFI_PASSPHRASE":          {},
-		"PRESEED_WIFI_PASSPHRASE":       {},
-		"live_wifi":                     {},
-		"live_wifi_enabled":             {},
-		"live_wifi_interface":           {},
-		"live_wifi_iface":               {},
-		"live_wifi_ssid":                {},
-		"live_wifi_essid":               {},
-		"live_wifi_essid_b64":           {},
-		"live_wifi_security":            {},
-		"live_wifi_cidr":                {},
-		"live_wifi_gateway":             {},
-		"live_wifi_nameservers":         {},
-		"live_wifi_psk":                 {},
-		"live_wifi_psk_b64":             {},
-		"live_wifi_wpa":                 {},
-		"netcfg/choose_interface":       {},
-		"netcfg/wireless_essid":         {},
-		"netcfg/wireless_security_type": {},
-		"netcfg/wireless_wpa":           {},
-	}
-	legacyKeyAliases = map[string]string{
+	legacyKeyAliases           = map[string]string{
 		"PRESEED_USB_DEBIAN_FILE":         "PRESEED_USB_DEBIAN_DE_FILE",
 		"PRESEED_USB_KALI_FILE":           "PRESEED_USB_KALI_DE_FILE",
 		"PRESEED_HOST_DEBIAN_PATH":        "PRESEED_HOST_DEBIAN_DE_PATH",
@@ -274,20 +223,16 @@ func normalizeConfigMap(raw map[string]string) (map[string]string, error) {
 		normalized[key] = value
 	}
 
+	// Explicit boot arguments are user-owned. Initrd env-file support must not
+	// reject installer netcfg/* parameters or other custom preseed values.
 	for _, key := range kernelArgKeys() {
 		normalized[key] = collapseWhitespace(normalized[key])
-		if err := validateNoLegacySecretKernelArgs(normalized[key], key); err != nil {
-			return nil, err
-		}
 	}
 	for key, value := range normalized {
 		if !isAdditionalKernelArgConfigKey(key) {
 			continue
 		}
 		normalized[key] = collapseWhitespace(value)
-		if err := validateNoLegacySecretKernelArgs(normalized[key], key); err != nil {
-			return nil, err
-		}
 	}
 	for _, profile := range preseedURLProfiles {
 		key := profileConfigKey(profile, "PRESEED_INTERNAL_URL")
@@ -455,7 +400,7 @@ func runtimeConfigSections() []configSection {
 			Comments: []string{
 				"Debian and Kali Live receive Wi-Fi hooks plus live-config.hooks=medium; APT repair is Debian-only.",
 				"DEFAULT_LIVE_HOOKS controls only optional additional hook arguments.",
-				"Wi-Fi values come from initrd/debian/live/live.env or initrd/kali/live/live.env, never kernel arguments.",
+				"Managed Wi-Fi uses initrd/<family>/live/live.env; explicit kernel arguments are preserved.",
 			},
 			Keys: []string{
 				"DEFAULT_LIVE_HOOKS",
@@ -624,7 +569,7 @@ func isAdditionalKernelArgConfigKey(key string) bool {
 	if key == "PRESEED_COMMON_KERNEL_ARGS" {
 		return true
 	}
-	return (strings.HasPrefix(key, "PRESEED_") && (strings.Contains(key, "_ARGS_") || strings.HasSuffix(key, "_KERNEL_ARGS"))) || (strings.Contains(key, "_PRESEED_") && strings.HasSuffix(key, "_ARGS"))
+	return strings.Contains(key, "_ARGS_") || strings.HasSuffix(key, "_ARGS") || strings.HasSuffix(key, "_KERNEL_EXTRAS")
 }
 
 func kernelArgKeys() []string {
@@ -691,7 +636,7 @@ func sortedExtraConfigKeys(data map[string]string) []string {
 }
 
 func isPreservedAdditionalConfigKey(key string) bool {
-	return strings.HasPrefix(key, "PRESEED_") || strings.HasSuffix(key, "_URL") || (strings.Contains(key, "_PRESEED_") && strings.HasSuffix(key, "_ARGS"))
+	return strings.HasPrefix(key, "PRESEED_") || strings.HasSuffix(key, "_URL") || isAdditionalKernelArgConfigKey(key)
 }
 
 func partitionLabelValuesFromMap(data map[string]string) map[string]string {
@@ -798,57 +743,6 @@ func normalizeNonNegativeIntString(value string, key string) (string, error) {
 		return "", fmt.Errorf("%s must be zero or greater", key)
 	}
 	return strconv.Itoa(number), nil
-}
-
-func validateNoLegacySecretKernelArgs(value string, key string) error {
-	found := make([]string, 0)
-	seen := make(map[string]struct{})
-	for _, token := range strings.Fields(value) {
-		name, _, hasValue := strings.Cut(token, "=")
-		if !hasValue {
-			continue
-		}
-		if _, forbidden := legacySecretKernelArgNames[name]; !forbidden {
-			continue
-		}
-		if _, duplicate := seen[name]; duplicate {
-			continue
-		}
-		seen[name] = struct{}{}
-		found = append(found, name)
-	}
-	if len(found) > 0 {
-		sort.Strings(found)
-		return fmt.Errorf(
-			"%s contains forbidden legacy secret kernel argument(s): %s; store these values in initrd/debian/netinst/desktop/preseed.env",
-			key,
-			strings.Join(found, ", "),
-		)
-	}
-	liveWifiFound := make([]string, 0)
-	for _, token := range strings.Fields(value) {
-		name, _, hasValue := strings.Cut(token, "=")
-		if !hasValue {
-			continue
-		}
-		if _, forbidden := liveWifiSecretKernelArgNames[name]; !forbidden {
-			continue
-		}
-		if _, duplicate := seen[name]; duplicate {
-			continue
-		}
-		seen[name] = struct{}{}
-		liveWifiFound = append(liveWifiFound, name)
-	}
-	if len(liveWifiFound) == 0 {
-		return nil
-	}
-	sort.Strings(liveWifiFound)
-	return fmt.Errorf(
-		"%s contains forbidden Live Wi-Fi kernel argument(s): %s; store every Wi-Fi value in initrd/debian/live/live.env",
-		key,
-		strings.Join(liveWifiFound, ", "),
-	)
 }
 
 func validatePreseedNetworkKernelArgs(value string, key string) (string, error) {

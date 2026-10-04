@@ -20,8 +20,6 @@ from .catalog import profile_for
 from .config import (
     effective_managed_payload_layout,
     PROFILE_PREFIXES,
-    LEGACY_SECRET_KERNEL_ARG_NAMES,
-    LIVE_WIFI_SECRET_KERNEL_ARG_NAMES,
     load_config,
     load_template_config,
     profile_usb_preseed_file,
@@ -344,17 +342,6 @@ def _kernel_arg_key(item: str) -> str:
     return item.split("=", 1)[0] if "=" in item else ""
 
 
-def _remove_secret_kernel_args(kernel_args: str) -> str:
-    forbidden = LEGACY_SECRET_KERNEL_ARG_NAMES | LIVE_WIFI_SECRET_KERNEL_ARG_NAMES
-    return _collapse_whitespace(
-        " ".join(
-            item
-            for item in _split_kernel_args(kernel_args)
-            if item.split("=", 1)[0] not in forbidden
-        )
-    )
-
-
 def _merge_kernel_args(kernel_args: str, additions: str) -> str:
     args = _split_kernel_args(kernel_args)
     additions_tokens = _split_kernel_args(additions)
@@ -397,7 +384,7 @@ def _live_hook_kernel_args(config_data: dict[str, str], profile: str) -> str:
     mandatory_args = " ".join(DEBIAN_LIVE_HOOK_KERNEL_ARGS)
     optional_args = ""
     if config_data.get("DEFAULT_LIVE_HOOKS", "0").strip() == "1":
-        optional_args = _remove_secret_kernel_args(config_data.get("DEFAULT_LIVE_ARGS_HOOKS", ""))
+        optional_args = _collapse_whitespace(config_data.get("DEFAULT_LIVE_ARGS_HOOKS", ""))
     return _merge_kernel_args(optional_args, mandatory_args)
 
 
@@ -581,7 +568,7 @@ def _apply_live_settings(kernel_args: str, config_data: dict[str, str], profile:
     mem_gib = int(config_data["DEFAULT_LIVE_MEM_GIB"])
     if mem_gib > 0:
         args = _merge_kernel_args(args, f"mem={mem_gib}G")
-    return _remove_secret_kernel_args(args)
+    return _collapse_whitespace(args)
 
 
 def _apply_installer_settings(kernel_args: str, config_data: dict[str, str], profile: str) -> str:
@@ -601,9 +588,7 @@ def _apply_installer_settings(kernel_args: str, config_data: dict[str, str], pro
     profile_extras = profile_installer_kernel_extras(config_data, profile)
     if profile_extras:
         args = _merge_kernel_args(args, profile_extras)
-    return _remove_secret_kernel_args(
-        _remove_live_only_kernel_args(_set_installer_seed_transport(args, url=profile_url))
-    )
+    return _remove_live_only_kernel_args(_set_installer_seed_transport(args, url=profile_url))
 
 
 def _installer_media_device_arg(payload_uuid: str) -> str:
@@ -1075,7 +1060,8 @@ def _escape_grub_argument_token(value: str) -> str:
 def _render_grub_kernel_args(kernel_args: str, isofile_path: str = "") -> str:
     normalized_isofile = _normalize_member_path(isofile_path)
     rendered: list[str] = []
-    for token in _split_kernel_args(_remove_secret_kernel_args(kernel_args)):
+    # Escape user-supplied values for GRUB without dropping argument names.
+    for token in _split_kernel_args(kernel_args):
         if normalized_isofile:
             for prefix in ("findiso=", "fromiso=", "iso-scan/filename=", "bootfrom="):
                 if token == f"{prefix}{normalized_isofile}":

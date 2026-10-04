@@ -125,63 +125,6 @@ PRESEED_NUMBER_NAMES = (
     "EIGHT",
     "NINE",
 )
-LEGACY_SECRET_KERNEL_ARG_NAMES = frozenset(
-    {
-        "fruux_username",
-        "fruux_password",
-        "primary_user",
-        "primary_password",
-        "primary_gpg_passphrase",
-        "root_password",
-        "crowdsec_token",
-        "tailscale_authkey",
-        "telegram_chat_id",
-        "telegram_api_key",
-        "cf_r2_access_key",
-        "cf_r2_secret_key",
-        "obs_username",
-        "obs_password",
-    }
-)
-LEGACY_SECRET_KERNEL_ARG_DESTINATION = "initrd/debian/netinst/desktop/preseed.env"
-LIVE_WIFI_SECRET_KERNEL_ARG_NAMES = frozenset(
-    {
-        "DEFAULT_LIVE_WIFI_INTERFACE",
-        "DEFAULT_LIVE_WIFI_ESSID",
-        "DEFAULT_LIVE_WIFI_SECURITY",
-        "DEFAULT_LIVE_WIFI_CIDR",
-        "DEFAULT_LIVE_WIFI_GATEWAY",
-        "DEFAULT_LIVE_WIFI_NAMESERVERS",
-        "DEFAULT_LIVE_WIFI_PSK",
-        "LIVE_WIFI_INTERFACE",
-        "LIVE_WIFI_ESSID",
-        "LIVE_WIFI_SECURITY",
-        "LIVE_WIFI_CIDR",
-        "LIVE_WIFI_GATEWAY",
-        "LIVE_WIFI_NAMESERVERS",
-        "LIVE_WIFI_PASSPHRASE",
-        "PRESEED_WIFI_PASSPHRASE",
-        "live_wifi",
-        "live_wifi_enabled",
-        "live_wifi_interface",
-        "live_wifi_iface",
-        "live_wifi_ssid",
-        "live_wifi_essid",
-        "live_wifi_essid_b64",
-        "live_wifi_security",
-        "live_wifi_cidr",
-        "live_wifi_gateway",
-        "live_wifi_nameservers",
-        "live_wifi_psk",
-        "live_wifi_psk_b64",
-        "live_wifi_wpa",
-        "netcfg/choose_interface",
-        "netcfg/wireless_essid",
-        "netcfg/wireless_security_type",
-        "netcfg/wireless_wpa",
-    }
-)
-LIVE_WIFI_SECRET_KERNEL_ARG_DESTINATION = "initrd/debian/live/live.env"
 
 PARTITION_LABEL_CONFIG_KEYS = (
     "DEFAULT_ESP_LABEL",
@@ -356,7 +299,7 @@ CONFIG_SECTIONS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
         (
             "Debian and Kali Live receive Wi-Fi hooks plus live-config.hooks=medium; APT repair is Debian-only.",
             "DEFAULT_LIVE_HOOKS controls only optional additional hook arguments.",
-            "Wi-Fi values come from initrd/debian/live/live.env or initrd/kali/live/live.env, never kernel arguments.",
+            "Managed Wi-Fi uses initrd/<family>/live/live.env; explicit kernel arguments are preserved.",
         ),
         (
             "DEFAULT_LIVE_HOOKS",
@@ -573,8 +516,12 @@ def _known_config_keys() -> set[str]:
     return keys
 
 
+def _is_additional_kernel_arg_key(key: str) -> bool:
+    return "_ARGS_" in key or key.endswith(("_ARGS", "_KERNEL_EXTRAS"))
+
+
 def _is_preserved_additional_key(key: str) -> bool:
-    return key.startswith("PRESEED_") or key.endswith("_URL") or ("_PRESEED_" in key and key.endswith("_ARGS"))
+    return key.startswith("PRESEED_") or key.endswith("_URL") or _is_additional_kernel_arg_key(key)
 
 
 def _normalize_absolute_preseed_file_string(value: str, key: str) -> str:
@@ -681,35 +628,6 @@ def _kernel_arg_config_keys() -> tuple[str, ...]:
     keys.extend(f"{PROFILE_PREFIXES[profile]}_FORENSICS_KERNEL_EXTRAS" for profile in FORENSICS_OVERRIDE_PROFILES)
     keys.extend(f"{PROFILE_PREFIXES[profile]}_INSTALLER_KERNEL_EXTRAS" for profile in INSTALLER_OVERRIDE_PROFILES)
     return tuple(dict.fromkeys(keys))
-
-
-def _reject_legacy_secret_kernel_args(value: str, key: str) -> None:
-    found = sorted(
-        {
-            token.split("=", 1)[0]
-            for token in value.split()
-            if token.split("=", 1)[0] in LEGACY_SECRET_KERNEL_ARG_NAMES
-        }
-    )
-    if found:
-        names = ", ".join(found)
-        raise ValueError(
-            f"{key} contains forbidden legacy secret kernel argument(s): {names}; "
-            f"store these values in {LEGACY_SECRET_KERNEL_ARG_DESTINATION}"
-        )
-    live_wifi_found = sorted(
-        {
-            token.split("=", 1)[0]
-            for token in value.split()
-            if token.split("=", 1)[0] in LIVE_WIFI_SECRET_KERNEL_ARG_NAMES
-        }
-    )
-    if live_wifi_found:
-        names = ", ".join(live_wifi_found)
-        raise ValueError(
-            f"{key} contains forbidden Live Wi-Fi kernel argument(s): {names}; "
-            f"store every Wi-Fi value in {LIVE_WIFI_SECRET_KERNEL_ARG_DESTINATION}"
-        )
 
 
 def _normalize_partition_label(value: str, key: str) -> str:
@@ -934,14 +852,18 @@ def normalize_config(data: dict[str, str]) -> OrderedDict[str, str]:
             normalized[key] = _normalize_absolute_dir_string(value, key)
         else:
             normalized[key] = _normalize_kernel_args_string(value)
-            _reject_legacy_secret_kernel_args(normalized[key], key)
     locations = [normalized[key] for key in INSTALLER_FLAVOR_CONFIG_KEYS if key.startswith("PRESEED_USB_")]
     if len(set(locations)) != len(locations):
         raise ValueError("Desktop/Server USB preseed folders must be distinct for Debian and Kali")
     for key in MANAGED_SOURCE_URL_KEYS:
         normalized[key] = _normalize_optional_url_string(normalized[key])
+    # Explicit boot arguments are user-owned, including installer netcfg/* and
+    # custom preseed values. Env-file support must not impose a name blacklist.
     for key in _kernel_arg_config_keys():
-        _reject_legacy_secret_kernel_args(normalized.get(key, ""), key)
+        normalized[key] = _normalize_kernel_args_string(normalized.get(key, ""))
+    for key, value in normalized.items():
+        if _is_additional_kernel_arg_key(key):
+            normalized[key] = _normalize_kernel_args_string(value)
     return normalized
 
 

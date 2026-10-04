@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from debian_usb.config import (
-    LEGACY_SECRET_KERNEL_ARG_NAMES,
+    _kernel_arg_config_keys,
     load_config,
     load_template_config,
     profile_payload_labels,
@@ -25,22 +25,38 @@ from debian_usb.config import (
     update_profile_preseed_url,
 )
 from debian_usb.devices import list_local_isos
+from kernel_args_fixture import PRESEED_NETWORK_ARGS, USER_KERNEL_ARG_NAMES
 
 
 class ConfigTests(unittest.TestCase):
-    def test_rejects_legacy_secret_kernel_arguments(self) -> None:
+    def test_accepts_previously_restricted_argument_names(self) -> None:
+        args = " ".join(f"{name}=fixture-value" for name in USER_KERNEL_ARG_NAMES)
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "debian-usb.conf"
-            for legacy_name in sorted(LEGACY_SECRET_KERNEL_ARG_NAMES):
-                with self.subTest(legacy_name=legacy_name):
-                    with self.assertRaisesRegex(
-                        ValueError,
-                        rf"PRESEED_ONE_ARGS_DEBIAN_DE contains forbidden legacy secret kernel argument.*{legacy_name}",
-                    ):
-                        save_config(
-                            str(config_path),
-                            {"PRESEED_ONE_ARGS_DEBIAN_DE": f"classes=test {legacy_name}=fixture-value"},
-                        )
+            save_config(str(config_path), {"PRESEED_ONE_ARGS_DEBIAN_DE": args})
+            self.assertEqual(load_config(str(config_path))["PRESEED_ONE_ARGS_DEBIAN_DE"], args)
+
+    def test_preserves_preseed_values_in_every_argument_field(self) -> None:
+        keys = set(_kernel_arg_config_keys())
+        keys.update(key for key in load_template_config() if "ARGS" in key or "KERNEL_EXTRAS" in key)
+        keys.update({"PRESEED_CUSTOM_ARGS_DEBIAN_DE", "PRESEED_WIFI_KERNEL_ARGS", "SITE_CUSTOM_ARGS"})
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "debian-usb.conf"
+            save_config(str(config_path), {key: PRESEED_NETWORK_ARGS for key in keys})
+            loaded = load_config(str(config_path))
+            for key in sorted(keys):
+                with self.subTest(key=key):
+                    self.assertEqual(loaded[key], PRESEED_NETWORK_ARGS)
+
+    def test_original_fifth_debian_preset_loads_and_round_trips_unchanged(self) -> None:
+        template = load_template_config()
+        original = load_config("configs/debian-usb.conf")
+        key = "PRESEED_FIVE_ARGS_DEBIAN_DE"
+        self.assertEqual(original[key], template[key])
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "round-trip.conf"
+            save_config(str(path), original)
+            self.assertEqual(load_config(str(path))[key], original[key])
 
     def test_update_default_persistence_size_rewrites_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -328,37 +344,12 @@ class ConfigTests(unittest.TestCase):
             self.assertFalse(any(key.startswith("DEFAULT_LIVE_WIFI_") for key in loaded))
             self.assertNotIn("DEFAULT_LIVE_WIFI_", rendered)
 
-    def test_rejects_all_live_wifi_kernel_arguments(self) -> None:
+    def test_live_hook_args_accept_preseed_and_custom_values(self) -> None:
+        args = "live-config.hooks=medium " + PRESEED_NETWORK_ARGS
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "debian-usb.conf"
-            for name in (
-                "DEFAULT_LIVE_WIFI_PSK",
-                "LIVE_WIFI_INTERFACE",
-                "LIVE_WIFI_ESSID",
-                "LIVE_WIFI_SECURITY",
-                "LIVE_WIFI_CIDR",
-                "LIVE_WIFI_GATEWAY",
-                "LIVE_WIFI_NAMESERVERS",
-                "LIVE_WIFI_PASSPHRASE",
-                "PRESEED_WIFI_PASSPHRASE",
-                "live_wifi_interface",
-                "live_wifi_essid_b64",
-                "live_wifi_security",
-                "live_wifi_cidr",
-                "live_wifi_gateway",
-                "live_wifi_nameservers",
-                "live_wifi_psk",
-                "live_wifi_psk_b64",
-                "live_wifi_wpa",
-                "netcfg/wireless_essid",
-                "netcfg/wireless_wpa",
-            ):
-                with self.subTest(name=name):
-                    with self.assertRaisesRegex(ValueError, "forbidden Live Wi-Fi kernel argument"):
-                        save_config(
-                            str(config_path),
-                            {"DEFAULT_LIVE_ARGS_HOOKS": f"live-config.hooks=medium {name}=fixture"},
-                        )
+            save_config(str(config_path), {"DEFAULT_LIVE_ARGS_HOOKS": args})
+            self.assertEqual(load_config(str(config_path))["DEFAULT_LIVE_ARGS_HOOKS"], args)
 
     def test_accepts_live_kernel_overrides_for_ubuntu_server(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -29,39 +29,77 @@ func replaceConfigAssignmentForTest(t *testing.T, content, key, value string) st
 	return strings.Join(lines, "\n")
 }
 
-func TestValidateNoLegacySecretKernelArgsRejectsEveryManagedSecret(t *testing.T) {
-	for legacyName := range legacySecretKernelArgNames {
-		t.Run(legacyName, func(t *testing.T) {
-			err := validateNoLegacySecretKernelArgs("classes=test "+legacyName+"=fixture-value", "PRESEED_ONE_ARGS_DEBIAN_DE")
-			if err == nil {
-				t.Fatalf("expected %s to be rejected", legacyName)
-			}
-			if !strings.Contains(err.Error(), legacyName) || !strings.Contains(err.Error(), "initrd/debian/netinst/desktop/preseed.env") {
-				t.Fatalf("expected key name and migration destination in error, got %v", err)
-			}
-		})
+func TestRuntimeConfigPreservesUserArgsInEveryArgumentField(t *testing.T) {
+	raw, err := parseConfigFile(repoConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := make(map[string]bool)
+	for _, key := range kernelArgKeys() {
+		keys[key] = true
+	}
+	for key := range raw {
+		if isAdditionalKernelArgConfigKey(key) {
+			keys[key] = true
+		}
+	}
+	for _, key := range []string{"PRESEED_CUSTOM_ARGS_DEBIAN_DE", "PRESEED_WIFI_KERNEL_ARGS", "SITE_CUSTOM_ARGS"} {
+		keys[key] = true
+	}
+	args := preseedNetworkArgsForTest
+	for _, name := range previouslyRestrictedArgNamesForTest {
+		// Put every formerly restricted name through every args field.
+		args += " " + name + "=fixture-value"
+	}
+	for key := range keys {
+		raw[key] = args
+	}
+	normalized, err := normalizeConfigMap(raw)
+	if err != nil {
+		t.Fatalf("valid user arguments were rejected: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "user-args.conf")
+	if _, err := saveRuntimeConfig(path, runtimeConfigFromMap(path, normalized)); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadRuntimeConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := configMapFromRuntimeConfig(cfg)
+	for key := range keys {
+		if normalized[key] != args {
+			t.Errorf("normalization changed %s", key)
+		}
+		if saved[key] != args {
+			t.Errorf("load/save changed %s", key)
+		}
 	}
 }
 
-func TestLoadRuntimeConfigRejectsLegacySecretInDynamicPreseedArgs(t *testing.T) {
-	content, err := os.ReadFile(repoConfigPath())
+func TestOriginalFifthDebianPresetLoadsAndRoundTripsUnchanged(t *testing.T) {
+	raw, err := parseConfigFile(repoConfigPath())
 	if err != nil {
-		t.Fatalf("read repo config: %v", err)
+		t.Fatal(err)
 	}
-	text := strings.Replace(
-		string(content),
-		`PRESEED_ONE_ARGS_DEBIAN_DE="`,
-		`PRESEED_ONE_ARGS_DEBIAN_DE="root_password=fixture-value `,
-		1,
-	)
-	path := filepath.Join(t.TempDir(), "legacy-secret-preseed-args.conf")
-	if err := os.WriteFile(path, []byte(text), 0644); err != nil {
-		t.Fatalf("write config: %v", err)
+	cfg, err := loadRuntimeConfig(repoConfigPath())
+	if err != nil {
+		t.Fatalf("supplied config must load: %v", err)
 	}
-
-	_, err = loadRuntimeConfig(path)
-	if err == nil || !strings.Contains(err.Error(), "PRESEED_ONE_ARGS_DEBIAN_DE") || !strings.Contains(err.Error(), "root_password") {
-		t.Fatalf("expected dynamic preseed secret rejection, got %v", err)
+	const key = "PRESEED_FIVE_ARGS_DEBIAN_DE"
+	if cfg.ExtraValues[key] != raw[key] {
+		t.Fatal("loading changed the supplied fifth preset")
+	}
+	path := filepath.Join(t.TempDir(), "round-trip.conf")
+	if _, err := saveRuntimeConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := loadRuntimeConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.ExtraValues[key] != raw[key] {
+		t.Fatal("saving changed the supplied fifth preset")
 	}
 }
 
@@ -327,27 +365,19 @@ DEFAULT_LIVE_WIFI_NAMESERVERS="192.168.50.1"
 	}
 }
 
-func TestLoadRuntimeConfigRejectsAllLiveWifiKernelArguments(t *testing.T) {
-	content, err := os.ReadFile(repoConfigPath())
+func TestLoadRuntimeConfigPreservesLegacyPresetAliasWithWifi(t *testing.T) {
+	raw, err := parseConfigFile(repoConfigPath())
 	if err != nil {
-		t.Fatalf("read repo config: %v", err)
+		t.Fatal(err)
 	}
-	for name := range liveWifiSecretKernelArgNames {
-		t.Run(name, func(t *testing.T) {
-			text := replaceConfigAssignmentForTest(
-				t,
-				string(content),
-				"DEFAULT_LIVE_ARGS_HOOKS",
-				"live-config.hooks=medium "+name+"=fixture",
-			)
-			path := filepath.Join(t.TempDir(), "live-wifi-secret.conf")
-			if err := os.WriteFile(path, []byte(text), 0644); err != nil {
-				t.Fatalf("write config: %v", err)
-			}
-			if _, err := loadRuntimeConfig(path); err == nil || !strings.Contains(err.Error(), "initrd/debian/live/live.env") {
-				t.Fatalf("expected %s to be rejected with the Live env destination, got %v", name, err)
-			}
-		})
+	delete(raw, "PRESEED_FIVE_ARGS_DEBIAN_DE")
+	raw["PRESEED_FIVE_ARGS_DEBIAN"] = preseedNetworkArgsForTest
+	normalized, err := normalizeConfigMap(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized["PRESEED_FIVE_ARGS_DEBIAN_DE"] != preseedNetworkArgsForTest {
+		t.Fatal("legacy alias lost explicit preseed Wi-Fi arguments")
 	}
 }
 

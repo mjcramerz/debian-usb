@@ -32,28 +32,13 @@ func (a *App) livePolicyKernelArgs() string {
 	return livePolicyKernelArgsForConfig(a.config)
 }
 
-func removeSecretKernelArgs(kernelArgs string) string {
-	filtered := make([]string, 0, len(strings.Fields(kernelArgs)))
-	for _, item := range strings.Fields(collapseWhitespace(kernelArgs)) {
-		name, _, _ := strings.Cut(item, "=")
-		if _, forbidden := legacySecretKernelArgNames[name]; forbidden {
-			continue
-		}
-		if _, forbidden := liveWifiSecretKernelArgNames[name]; forbidden {
-			continue
-		}
-		filtered = append(filtered, item)
-	}
-	return collapseWhitespace(strings.Join(filtered, " "))
-}
-
 func liveHookKernelArgsForConfig(config RuntimeConfig, profile string) string {
 	if profile != profileDebian {
 		return ""
 	}
 	optionalArgs := ""
 	if config.DefaultLiveHooks {
-		optionalArgs = removeSecretKernelArgs(config.DefaultLiveArgsHooks)
+		optionalArgs = collapseWhitespace(config.DefaultLiveArgsHooks)
 	}
 	return mergeKernelArgs(optionalArgs, mandatoryDebianLiveHookKernelArgs)
 }
@@ -62,11 +47,9 @@ func applyLiveHookKernelArgsToBuildPlan(config RuntimeConfig, plan *BuildISOPlan
 	if plan == nil || plan.Distro != buildISODistroDebian || plan.InstallerMode == buildISOInstallerModeNetinst {
 		return
 	}
-	plan.LiveBootAppend = removeSecretKernelArgs(plan.LiveBootAppend)
 	if hookArgs := liveHookKernelArgsForConfig(config, profileDebian); hookArgs != "" {
 		plan.LiveBootAppend = mergeKernelArgs(plan.LiveBootAppend, hookArgs)
 	}
-	plan.LiveBootAppend = removeSecretKernelArgs(plan.LiveBootAppend)
 }
 
 func firstNonEmpty(values ...string) string {
@@ -118,7 +101,7 @@ func defaultLiveKernelArgsForSelection(config RuntimeConfig, spec profileSpec, p
 			args = mergeKernelArgs(args, "persistent")
 		}
 		args = mergeKernelArgs(args, "iso-scan/filename=${isofile}")
-		return removeSecretKernelArgs(args)
+		return collapseWhitespace(args)
 	}
 	args = removeKernelArgsByExact(args, "ignore_uuid", "persistence", "nopersistence", "persistent=cryptsetup")
 	args = removeKernelArgsByPrefix(
@@ -128,7 +111,7 @@ func defaultLiveKernelArgsForSelection(config RuntimeConfig, spec profileSpec, p
 	)
 	args = mergeKernelArgs(args, "findiso=${isofile}")
 	if spec.Key == profileTails {
-		return removeSecretKernelArgs(args)
+		return collapseWhitespace(args)
 	}
 	if persistenceMode == "encrypted" {
 		if spec.Key == profileKaliLinux {
@@ -146,7 +129,7 @@ func defaultLiveKernelArgsForSelection(config RuntimeConfig, spec profileSpec, p
 		}
 		args = mergeKernelArgs(args, "persistence persistence-label="+fsLabel+" persistence-media=removable-usb persistence-storage=filesystem union=overlay")
 	}
-	return removeSecretKernelArgs(args)
+	return collapseWhitespace(args)
 }
 
 func defaultLiveKernelArgsForConfig(config RuntimeConfig, spec profileSpec, persistenceMode string) string {
@@ -174,7 +157,7 @@ func defaultInstallerKernelArgsForConfig(config RuntimeConfig) string {
 	}
 	args = removeKernelArgsByExact(args, "toram")
 	args = removeKernelArgsByPrefix(args, "toram=")
-	return removeSecretKernelArgs(args)
+	return collapseWhitespace(args)
 }
 
 func (a *App) defaultInstallerKernelArgs() string {

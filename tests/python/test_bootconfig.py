@@ -1,4 +1,5 @@
 from installer_fixture import write_installer_initrd
+from kernel_args_fixture import LEGACY_SECRET_KERNEL_ARG_NAMES, PRESEED_NETWORK_ARGS
 from pathlib import Path
 import json
 import os
@@ -29,7 +30,6 @@ from debian_usb.boot_render import (
     render_custom_main_menu,
 )
 from debian_usb.config import (
-    LEGACY_SECRET_KERNEL_ARG_NAMES,
     load_config,
     load_template_config,
     save_config,
@@ -1259,7 +1259,7 @@ label live
             self.assertIn("insmod iso9660", rendered["grub_cfg"])
             self.assertNotIn("insmod ext2", rendered["grub_cfg"])
 
-    def test_render_managed_grub_enforces_mandatory_wifi_free_live_hook_args(self) -> None:
+    def test_render_managed_grub_preserves_explicit_wifi_args_with_mandatory_hooks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             config_path = root / "debian-usb.conf"
@@ -1297,12 +1297,12 @@ label live
             entries = parse_grub_entries(rendered["grub_cfg"], "boot/grub/grub.cfg")
             live_entry = next(entry for entry in entries if entry.title == "Live")
             self.assertIn("live-config.hooks=medium", live_entry.kernel_args)
-            for token in live_entry.kernel_args.split():
-                key = token.split("=", 1)[0]
-                self.assertFalse(key.startswith("live_wifi_"), token)
-                self.assertFalse(key.startswith("LIVE_WIFI_"), token)
-                self.assertFalse(key.startswith("DEFAULT_LIVE_WIFI_"), token)
-                self.assertFalse(key.startswith("netcfg/wireless_"), token)
+            for token in (
+                "live_wifi_psk_b64=cmV0aXJlZA", "LIVE_WIFI_ESSID=retired",
+                "DEFAULT_LIVE_WIFI_GATEWAY=192.0.2.1",
+                "netcfg/wireless_essid=retired", "netcfg/wireless_wpa=retired",
+            ):
+                self.assertIn(token, live_entry.kernel_args.split())
 
     def test_live_hook_args_are_limited_to_debian_profile(self) -> None:
         config_data = {
@@ -1319,7 +1319,7 @@ label live
         self.assertEqual(_live_hook_kernel_args(config_data, "tails"), "")
         self.assertEqual(_live_hook_kernel_args(config_data, "ubuntu-desktop"), "")
 
-    def test_live_hook_args_strip_all_wifi_transports(self) -> None:
+    def test_live_hook_args_preserve_explicit_wifi_transports(self) -> None:
         config_data = {
             "DEFAULT_LIVE_HOOKS": "1",
             "DEFAULT_LIVE_ARGS_HOOKS": (
@@ -1331,7 +1331,9 @@ label live
 
         rendered = _live_hook_kernel_args(config_data, "debian")
 
-        self.assertEqual(rendered, "debug=1 live-config.hooks=medium")
+        self.assertEqual(rendered, "debug=1 live_wifi_essid_b64=R3Vlc3QgTmV0 "
+                         "LIVE_WIFI_SECURITY=open DEFAULT_LIVE_WIFI_INTERFACE=wlan0 "
+                         "netcfg/wireless_essid=retired live-config.hooks=medium")
 
     def test_render_managed_grub_with_secure_boot_assets_includes_mok_entry(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1687,6 +1689,50 @@ menuentry '... Rescue mode' {
                             self.assertEqual(_seed_transport_tokens(entry.kernel_args), [f"file=/hd-media/debian-preseed-{suffix}/preseed.cfg"])
             self.assertFalse(any("Live Environment" in entry.title for entry in entries))
 
+    def test_explicit_preseed_args_survive_all_installer_profile_transports(self) -> None:
+        for profile, family in (("debian", "DEBIAN"), ("kali-linux", "KALI")):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                config_path = root / "debian-usb.conf"
+                overrides = {
+                    "PRESEED_COMMON_KERNEL_ARGS": "auto=true common/preseed=fixture",
+                    "DEFAULT_INSTALLER_KERNEL_EXTRAS": "global/preseed=fixture",
+                    profile.upper().replace("-", "_") + "_INSTALLER_KERNEL_EXTRAS": "profile/preseed=fixture",
+                }
+                for flavor in ("DE", "SRV"):
+                    overrides[f"PRESEED_ONE_ARGS_{family}_{flavor}"] = PRESEED_NETWORK_ARGS
+                    url_prefix = ("DEBIAN" if family == "DEBIAN" else "KALI_LINUX") + "_" + flavor
+                    overrides[f"{url_prefix}_PRESEED_PUBLIC_URL"] = "https://example.test/preseed.cfg"
+                    overrides[f"{url_prefix}_PRESEED_INTERNAL_URL"] = "http://example.test/preseed.cfg"
+                    overrides[f"{url_prefix}_PRESEED_PUBLIC_ARGS"] = "web/preseed=fixture"
+                    overrides[f"{url_prefix}_PRESEED_INTERNAL_ARGS"] = "lan/preseed=fixture"
+                save_config(str(config_path), overrides)
+                (root / "EFI/boot").mkdir(parents=True)
+                (root / "EFI/boot/bootx64.efi").write_text("", encoding="utf-8")
+                _write_prepared_netinst_assets(root)
+                (root / "boot/grub").mkdir(parents=True)
+                (root / "boot/grub/grub.cfg").write_text(
+                    "menuentry 'Install' {\n  linux /hd-media/vmlinuz ---\n"
+                    "  initrd /hd-media/initrd.gz\n}\n", encoding="utf-8",
+                )
+                result = render_managed_grub(
+                    source_path=str(root), profile=profile, live_uuid="FIXTURE-UUID",
+                    persistence=False, config_path=str(config_path),
+                    use_custom_menu=True, include_preseed_entries=True,
+                )
+                entries = parse_grub_entries(result["grub_cfg"], "boot/grub/grub.cfg")
+                selected = [entry for entry in entries if "custom/preseed_option=fixture" in entry.kernel_args]
+                self.assertEqual(len(selected), 8)  # Desktop/Server x four transports.
+                for entry in selected:
+                    for token in PRESEED_NETWORK_ARGS.split():
+                        self.assertIn(token.replace(";", "\\;").replace("!", "\\!"), entry.kernel_args.split())
+                    for name in ("common", "global", "profile"):
+                        self.assertIn(name + "/preseed=fixture", entry.kernel_args.split())
+                    if "HTTPS WEB" in entry.menu_path[-1]:
+                        self.assertIn("web/preseed=fixture", entry.kernel_args.split())
+                    elif "HTTP LAN" in entry.menu_path[-1]:
+                        self.assertIn("lan/preseed=fixture", entry.kernel_args.split())
+
     def test_render_grub_entry_escapes_special_kernel_arg_characters(self) -> None:
         entry = BootEntry(
             title="Debian Netinst Install",
@@ -1708,8 +1754,7 @@ menuentry '... Rescue mode' {
         self.assertIn("linux /install.amd/vmlinuz auto=true", rendered)
         self.assertIn(r"classes=prod\;desktop\;static", rendered)
         self.assertIn(r"diagnostic_tag=5B\&876@key3@%0V\$09\#wq27\$8LzmZ2\!\&CnR^E^G", rendered)
-        self.assertNotIn("crowdsec_token=", rendered)
-        self.assertNotIn("retired-secret-transport", rendered)
+        self.assertIn("crowdsec_token=retired-secret-transport", rendered)
         self.assertIn(r"url=https://example.test/preseed.cfg?token=a\&mode=b", rendered)
         self.assertIn("initrd /install.amd/initrd.gz", rendered)
 

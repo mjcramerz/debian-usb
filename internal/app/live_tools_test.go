@@ -197,21 +197,46 @@ func TestLiveHookKernelArgsKeepMandatorySelectorWhenOptionalHooksAreDisabled(t *
 	}
 }
 
-func TestLiveHookKernelArgsStripEveryWifiTransport(t *testing.T) {
+func TestLiveHookKernelArgsPreserveExplicitWifiArguments(t *testing.T) {
+	args := preseedNetworkArgsForTest + " LIVE_WIFI_PASSPHRASE=fixture root_password=fixture live_wifi_psk=fixture"
 	config := RuntimeConfig{
-		DefaultLiveHooks: true,
-		DefaultLiveArgsHooks: "live-config.hooks=filesystem custom=1 " +
-			"live_wifi_interface=wlan0 live_wifi_essid_b64=SW5zdGFsbE5ldA " +
-			"LIVE_WIFI_PASSPHRASE=MustNotLeak netcfg/wireless_essid=InstallNet",
+		DefaultLiveHooks:     true,
+		DefaultLiveArgsHooks: "live-config.hooks=filesystem custom=1 " + args,
 	}
 	got := liveHookKernelArgsForConfig(config, profileDebian)
-	if !strings.Contains(got, "custom=1") || !strings.Contains(got, mandatoryDebianLiveHookKernelArgs) {
-		t.Fatalf("expected non-Wi-Fi hook arguments and mandatory selector, got %q", got)
+	assertUserArgsPreservedForTest(t, got, args)
+	if !strings.Contains(got, mandatoryDebianLiveHookKernelArgs) {
+		t.Fatal("missing mandatory hook selector")
 	}
-	for _, forbidden := range []string{"live_wifi_", "LIVE_WIFI_", "netcfg/wireless_"} {
-		if strings.Contains(got, forbidden) {
-			t.Fatalf("Live Wi-Fi transport %q survived in kernel args %q", forbidden, got)
+	if strings.Contains(got, "live-config.hooks=filesystem") {
+		t.Fatal("mandatory hook selector did not take precedence")
+	}
+}
+
+func TestLiveBuildPlanPreservesExplicitPreseedArgs(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		config := RuntimeConfig{DefaultLiveHooks: enabled, DefaultLiveArgsHooks: preseedNetworkArgsForTest}
+		plan := BuildISOPlan{
+			Distro:         buildISODistroDebian,
+			LiveBootAppend: preseedNetworkArgsForTest + " root_password=fixture",
 		}
+		applyLiveHookKernelArgsToBuildPlan(config, &plan)
+		assertUserArgsPreservedForTest(t, plan.LiveBootAppend, preseedNetworkArgsForTest+" root_password=fixture")
+	}
+}
+
+func TestDefaultKernelArgsPreserveExplicitPreseedValues(t *testing.T) {
+	config := RuntimeConfig{
+		DefaultBootPolicy: "balanced", DefaultInstallerPolicy: "installer-preseed",
+		DefaultLiveKernelExtras:      preseedNetworkArgsForTest,
+		DefaultInstallerKernelExtras: preseedNetworkArgsForTest,
+		ExtraValues:                  map[string]string{"PRESEED_COMMON_KERNEL_ARGS": "auto=true root_password=fixture"},
+	}
+	got := defaultInstallerKernelArgsForConfig(config)
+	assertUserArgsPreservedForTest(t, got, preseedNetworkArgsForTest+" root_password=fixture")
+	for _, profile := range []string{profileDebian, profileKaliLinux, profileUbuntuDesktop, profileUbuntuServer} {
+		got := defaultLiveKernelArgsForConfig(config, profileSpecs[profile], "")
+		assertUserArgsPreservedForTest(t, got, preseedNetworkArgsForTest)
 	}
 }
 

@@ -16,6 +16,7 @@ import sys
 from typing import Any, Iterator
 
 from .boot_parse import _find_boot_entries, _media_class, _select_entry, _select_text_installer_entry
+from .boot_render import _render_grub_kernel_args
 from .build_iso import (
     DEFAULT_CACHE_DIR,
     DEFAULT_LOG_DIR,
@@ -143,44 +144,6 @@ ARCH_HINTS = {
     "/arm64/": "arm64",
 }
 LIVE_BOOT_CONFIG_ROOTS = {"boot", "efi", "isolinux", "syslinux"}
-LIVE_KERNEL_ARG_TOKEN_RE = re.compile(r"^[A-Za-z0-9._:+/@${},=-]+$")
-LIVE_WIFI_SECRET_KERNEL_ARG_NAMES = frozenset(
-    {
-        "DEFAULT_LIVE_WIFI_INTERFACE",
-        "DEFAULT_LIVE_WIFI_ESSID",
-        "DEFAULT_LIVE_WIFI_SECURITY",
-        "DEFAULT_LIVE_WIFI_CIDR",
-        "DEFAULT_LIVE_WIFI_GATEWAY",
-        "DEFAULT_LIVE_WIFI_NAMESERVERS",
-        "DEFAULT_LIVE_WIFI_PSK",
-        "LIVE_WIFI_INTERFACE",
-        "LIVE_WIFI_ESSID",
-        "LIVE_WIFI_SECURITY",
-        "LIVE_WIFI_CIDR",
-        "LIVE_WIFI_GATEWAY",
-        "LIVE_WIFI_NAMESERVERS",
-        "LIVE_WIFI_PASSPHRASE",
-        "PRESEED_WIFI_PASSPHRASE",
-        "live_wifi",
-        "live_wifi_enabled",
-        "live_wifi_interface",
-        "live_wifi_iface",
-        "live_wifi_ssid",
-        "live_wifi_essid",
-        "live_wifi_essid_b64",
-        "live_wifi_security",
-        "live_wifi_cidr",
-        "live_wifi_gateway",
-        "live_wifi_nameservers",
-        "live_wifi_psk",
-        "live_wifi_psk_b64",
-        "live_wifi_wpa",
-        "netcfg/choose_interface",
-        "netcfg/wireless_essid",
-        "netcfg/wireless_security_type",
-        "netcfg/wireless_wpa",
-    }
-)
 MOUNTINFO_ESCAPE_RE = re.compile(r"\\([0-7]{3})")
 
 
@@ -1053,16 +1016,12 @@ def remaster_live_tools_source(
 
 
 def _validate_live_kernel_args(value: str) -> str:
-    normalized = " ".join(str(value or "").split())
-    for token in normalized.split():
-        if not LIVE_KERNEL_ARG_TOKEN_RE.fullmatch(token):
-            raise ValueError(f"invalid Live kernel argument token: {token}")
-        if token.split("=", 1)[0] in LIVE_WIFI_SECRET_KERNEL_ARG_NAMES:
-            raise ValueError(
-                "Live Wi-Fi kernel arguments are forbidden; "
-                "use LIVE_WIFI_* assignments in initrd/debian/live/live.env"
-            )
-    return normalized
+    # Parameter names and printable values belong to the user. GRUB syntax is
+    # escaped at the output boundary instead of banning valid preseed values.
+    text = str(value or "")
+    if any((ord(char) < 32 and char not in " \t\r\n") or ord(char) == 127 for char in text):
+        raise ValueError("invalid control character in Live kernel arguments")
+    return " ".join(text.split())
 
 
 def _merge_live_kernel_line(payload: str, additions: str) -> str:
@@ -1086,6 +1045,8 @@ def _merge_live_kernel_line(payload: str, additions: str) -> str:
 
 
 def _patch_live_boot_configs(iso_root: Path, live_kernel_args: str) -> list[str]:
+    live_kernel_args = _validate_live_kernel_args(live_kernel_args)
+    grub_kernel_args = _render_grub_kernel_args(live_kernel_args)
     modified_paths: list[str] = []
     for config_path in sorted(iso_root.rglob("*.cfg")):
         if not config_path.is_file() or config_path.is_symlink():
@@ -1114,7 +1075,9 @@ def _patch_live_boot_configs(iso_root: Path, live_kernel_args: str) -> list[str]
             if not live_line:
                 updated_lines.append(raw_line)
                 continue
-            merged_payload = _merge_live_kernel_line(payload, live_kernel_args)
+            # Syslinux APPEND is literal; GRUB linux commands require escaping.
+            additions = live_kernel_args if match.group("prefix").strip() == "append" else grub_kernel_args
+            merged_payload = _merge_live_kernel_line(payload, additions)
             updated_line = match.group("prefix") + merged_payload + newline
             updated_lines.append(updated_line)
             changed = changed or updated_line != raw_line

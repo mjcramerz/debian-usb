@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from debian_usb.boot_parse import BootEntry
 from debian_usb import rebuild_iso
+from kernel_args_fixture import PRESEED_NETWORK_ARGS, USER_KERNEL_ARG_NAMES
 
 
 def minimal_plan(source_iso_path: str) -> dict[str, object]:
@@ -1405,25 +1406,40 @@ class RebuildISOTests(unittest.TestCase):
         self.assertNotIn("live-config.hooks", grub_text.splitlines()[1])
         self.assertIn("debian_usb.profile=test", isolinux_text)
 
-    def test_validate_live_kernel_args_rejects_grub_command_separators(self) -> None:
-        with self.assertRaisesRegex(ValueError, "invalid Live kernel argument token"):
-            rebuild_iso._validate_live_kernel_args("live-config.hooks=medium; halt")
+    def test_validate_live_kernel_args_preserves_user_names_and_punctuation(self) -> None:
+        args = PRESEED_NETWORK_ARGS + " " + " ".join(f"{name}=fixture" for name in USER_KERNEL_ARG_NAMES)
+        self.assertEqual(rebuild_iso._validate_live_kernel_args(args), args)
 
-    def test_validate_live_kernel_args_rejects_all_wifi_transports(self) -> None:
-        forbidden = (
-            "live_wifi_psk_b64=cmV0aXJlZA",
-            "live_wifi_essid_b64=cmV0aXJlZA",
-            "LIVE_WIFI_ESSID=retired",
-            "DEFAULT_LIVE_WIFI_INTERFACE=wlan0",
-            "netcfg/wireless_essid=retired",
-            "netcfg/wireless_wpa=retired",
-        )
-        for argument in forbidden:
-            with self.subTest(argument=argument):
-                with self.assertRaisesRegex(ValueError, "Live Wi-Fi kernel arguments are forbidden"):
-                    rebuild_iso._validate_live_kernel_args(
-                        f"live-config.hooks=medium {argument}"
-                    )
+    def test_validate_live_kernel_args_rejects_control_characters(self) -> None:
+        for char in ("\x00", "\x01", "\x1b", "\x7f"):
+            with self.subTest(char=repr(char)):
+                with self.assertRaisesRegex(ValueError, "invalid control character"):
+                    rebuild_iso._validate_live_kernel_args("netcfg/wireless_essid=bad" + char)
+
+    def test_patch_live_boot_configs_preserves_preseed_with_safe_grub_escaping(self) -> None:
+        args = PRESEED_NETWORK_ARGS + " diagnostic_tag=a&b$HOME#tag!;value"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            grub = root / "boot/grub/grub.cfg"
+            syslinux = root / "isolinux/live.cfg"
+            grub.parent.mkdir(parents=True)
+            syslinux.parent.mkdir(parents=True)
+            grub.write_text("linux /live/vmlinuz boot=live netcfg/wireless_essid=old ---\n"
+                            "linux /install/vmlinuz auto=true ---\n", encoding="utf-8")
+            syslinux.write_text("append initrd=/live/initrd.img boot=live ---\n", encoding="utf-8")
+            rebuild_iso._patch_live_boot_configs(root, args)
+            grub_text = grub.read_text(encoding="utf-8")
+            syslinux_text = syslinux.read_text(encoding="utf-8")
+            self.assertIn(r"classes=prod\;desktop\;standard", grub_text)
+            self.assertIn(r"netcfg/wireless_wpa=Example_1122\!\!", grub_text)
+            self.assertIn(r"diagnostic_tag=a\&b\$HOME\#tag\!\;value", grub_text)
+            self.assertNotIn("netcfg/wireless_essid=old", grub_text)
+            self.assertEqual(grub_text.splitlines()[1], "linux /install/vmlinuz auto=true ---")
+            for token in args.split():
+                self.assertIn(token, syslinux_text.split())
+            self.assertEqual(rebuild_iso._patch_live_boot_configs(root, args), [])
+            self.assertEqual(grub.read_text(encoding="utf-8"), grub_text)
+            self.assertEqual(syslinux.read_text(encoding="utf-8"), syslinux_text)
 
     def test_remaster_live_tools_source_rejects_non_debian_kali_hook_arguments_before_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
